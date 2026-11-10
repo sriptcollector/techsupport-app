@@ -5,6 +5,7 @@ import { emitTo, listen } from "@tauri-apps/api/event";
 import { useEffect, useRef, useState } from "react";
 import { Bot, type Expr } from "./bot";
 import { autopilot, windowsList, type Win } from "./api";
+import { saidThatsAll } from "./voice";
 
 type Mode = "off" | "walk" | "pick" | "mark";
 type Pin = { n: number; x: number; y: number; at: number };
@@ -126,7 +127,8 @@ export function Overlay() {
     const last = [...pins.map((p) => ({ at: p.at, x: p.x, y: p.y, pin: p.n })), ...strokes.map((s) => ({ at: s.at, x: s.pts[s.pts.length - 1][0], y: s.pts[s.pts.length - 1][1], pin: null as number | null }))].sort((a, b) => b.at - a.at)[0];
     // Words said right after a mark sit next to that mark.
     const near = last && at - last.at < 10_000 ? last : null; // `at` is when the words came back, a few seconds after they were said
-    if (near) setTags((t) => [...t, { x: near.x, y: near.y, text }]);
+    // "That's all" ends bug mode; it isn't a note about the problem.
+    if (near && !saidThatsAll(text)) setTags((t) => [...t, { x: near.x, y: near.y + 50 * t.filter((o) => Math.hypot(o.x - near.x, o.y - near.y) < 60 || o.x === near.x).length, text }]);
     emitTo("panel", "ov:tagged", { text, pin: near?.pin ?? null });
   }
 

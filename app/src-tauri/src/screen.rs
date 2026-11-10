@@ -86,6 +86,10 @@ pub fn windows_list() -> Vec<Win> {
             if app.is_empty() && title.is_empty() {
                 return None;
             }
+            // Never offer our own windows (the overlay covers the whole screen).
+            if app == "Tech Support" || app == "tech-support" || title.starts_with("Tech Support") || title == "Report a bug" {
+                return None;
+            }
             Some(Win { title, app, x: x / scale, y: y / scale, w: ww / scale, h: hh / scale })
         })
         .collect()

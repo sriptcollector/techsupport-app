@@ -12,6 +12,7 @@ export type UI = {
   plan: (understood: string, steps: string[]) => Promise<Pick | string>; // a pick, or new words from the person
   ask: (question: string, options: string[]) => Promise<string>;
   bot: (text: string) => void; // a line in the chat panel
+  avoid: (x: number, y: number) => Promise<void>; // move the Step pill off the spot about to be pressed
   progress: (n: number, total: number, task: string) => void;
   walking: (on: boolean) => void;
   needsYou: (text: string) => void;
@@ -163,7 +164,7 @@ export class Session {
     switch (name) {
       case "plan": {
         this.total = i.steps?.length ?? 0;
-        this.task = i.understood ?? this.task;
+        this.task = i.task || i.understood || this.task;
         ov("ov:expr", { expr: "idle" });
         const pick = await this.ui.plan(i.understood, i.steps ?? []);
         if (pick === "do" || pick === "show" || pick === "steps") {
@@ -275,6 +276,7 @@ export class Session {
     const p = this.toScreen(c);
     const ms = this.flightMs(p);
     ov("ov:expr", { expr: "focused" });
+    await this.ui.avoid(p[0], p[1]);
     ov("ov:fly", { x: p[0], y: p[1], ms });
     await sleep(ms);
     return p;

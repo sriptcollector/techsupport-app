@@ -2,7 +2,7 @@
 // the two big buttons, the chat (voice first, typing takes over), the plan card, the Step pill
 // while the character works, and the "Did that fix it?" card.
 import { emitTo, listen } from "@tauri-apps/api/event";
-import { getCurrentWindow, LogicalSize } from "@tauri-apps/api/window";
+import { getCurrentWindow, LogicalPosition, LogicalSize } from "@tauri-apps/api/window";
 import { openUrl } from "@tauri-apps/plugin-opener";
 import { register, unregister } from "@tauri-apps/plugin-global-shortcut";
 import { invoke } from "@tauri-apps/api/core";
@@ -63,6 +63,25 @@ export function Panel() {
     }
     await win.show();
     if (v !== "pill") await win.setFocus();
+    // Big system text (or the person's own setting) can make the content larger than the window: grow to fit.
+    requestAnimationFrame(async () => {
+      const d = document.documentElement;
+      const sx = d.scrollWidth / innerWidth, sy = d.scrollHeight / innerHeight;
+      if (size && (sx > 1.01 || sy > 1.01)) await placePanel(Math.ceil(size[0] * Math.max(1, sx)), Math.ceil(size[1] * Math.max(1, sy)));
+    });
+  }
+  // Keep the pill off the spot the helper is about to press.
+  const pillLow = useRef(false);
+  async function avoid(x: number, y: number) {
+    if (viewRef.current !== "pill") return;
+    const k = await win.scaleFactor();
+    const pos = (await win.outerPosition()).toLogical(k);
+    const sz = (await win.outerSize()).toLogical(k);
+    if (x > pos.x - 40 && x < pos.x + sz.width + 40 && y > pos.y - 40 && y < pos.y + sz.height + 40) {
+      pillLow.current = !pillLow.current;
+      const { availWidth, availHeight } = window.screen;
+      await win.setPosition(new LogicalPosition(pillLow.current ? 16 : availWidth - sz.width - 16, pillLow.current ? availHeight - sz.height - 16 : 40));
+    }
   }
 
   // ---------- start-up: who is this, have they started the trial, are permissions on ----------
@@ -220,6 +239,7 @@ export function Panel() {
         };
       }),
     bot: (text: string) => say("bot", text),
+    avoid: (x: number, y: number) => avoid(x, y),
     progress: (n: number, total: number, task: string) => setProgress({ n, total, task }),
     walking: async (on: boolean) => {
       if (on) {
@@ -738,7 +758,9 @@ function Perms({ progress, onDone }: { progress: React.ReactNode; onDone: () => 
     return () => clearInterval(iv);
   }, []);
   useEffect(() => {
-    if (p.mic && p.screen && p.control) setTimeout(onDone, 900);
+    if (!(p.mic && p.screen && p.control)) return;
+    // Newer Macs ask once more ("bypass the private window picker"): ask it here, not mid-help.
+    capture(undefined, 320).catch(() => {}).finally(() => setTimeout(onDone, 900));
   }, [p]);
   async function turnOn() {
     setGoing(true);
@@ -776,7 +798,7 @@ function Perms({ progress, onDone }: { progress: React.ReactNode; onDone: () => 
           {row(p.control, "Click and type for you", "Accessibility")}
         </div>
         <div className="grow" />
-        {going && !all ? <p>In the window that opened, flip the switch next to Tech Support.</p> : null}
+        {going && !all ? <p>In the window that opened, flip the switch next to Tech Support.</p> : all ? <p>If your Mac asks once more, press Allow.</p> : null}
         <button className="btn primary full" autoFocus disabled={all} onClick={turnOn}>{going ? "Try again" : "Turn on"}</button>
         <p className="small" style={{ margin: "10px 0 0" }}>You'll press Allow once and flip 2 switches. I'll point to them.</p>
         <button className="link" style={{ fontSize: 14 }} onClick={onDone}>Skip for now</button>

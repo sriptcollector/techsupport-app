@@ -71,7 +71,7 @@ p { margin: 0 0 16px; max-width: 42ch; }
 .btn.full { width: 100%; }
 .btn.stop { background: var(--stop); border-color: var(--stop); color: #fff; min-height: 40px; padding: 0 14px; }
 .link { background: none; border: 0; padding: 8px; color: var(--ink); text-decoration: underline; text-underline-offset: 3px; font-size: 15px; }
-.big { min-height: 64px; width: 100%; border-radius: var(--r-btn); border: 1px solid var(--hair-strong); background: var(--surface); display: flex; align-items: center; gap: 14px; padding: 0 18px; text-align: left; font-size: 18px; font-weight: 500; transition: background 150ms var(--ease), border-color 150ms; }
+.big { min-height: 64px; padding-block: 10px; width: 100%; border-radius: var(--r-btn); border: 1px solid var(--hair-strong); background: var(--surface); display: flex; align-items: center; gap: 14px; padding: 0 18px; text-align: left; font-size: 18px; font-weight: 500; transition: background 150ms var(--ease), border-color 150ms; }
 .big:hover { border-color: var(--ink); }
 .big.primary { background: var(--ink); color: var(--bg); border-color: var(--ink); }
 .big .sub { display: block; font-size: 14px; font-weight: 400; color: var(--ink-2); }
@@ -90,6 +90,7 @@ p { margin: 0 0 16px; max-width: 42ch; }
 
 /* ---------- chat ---------- */
 .chat { flex: 1; overflow-y: auto; display: flex; flex-direction: column; gap: 10px; padding: 4px 2px 12px; }
+.chat > * { flex-shrink: 0; }
 .msg { max-width: 88%; padding: 10px 14px; border-radius: var(--r-bubble); line-height: 23px; user-select: text; }
 .msg.bot { background: var(--surface); border: 1px solid var(--hair); align-self: flex-start; }
 .msg.me { background: var(--user); color: var(--user-ink); align-self: flex-end; }
