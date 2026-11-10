@@ -116,9 +116,11 @@ jobs:
         run: |
           case "${{ matrix.task }}" in
             broken*) printf '{\\rtf1\\ansi{\\fonttbl\\f0 Helvetica;}\\f0\\fs6 Milk\\par Eggs\\par Bread\\par Call the pharmacy about the refill}' > "$HOME/Desktop/Grocery list.rtf"; open -a TextEdit "$HOME/Desktop/Grocery list.rtf"; sleep 4;;
-            safe) open -a Safari "https://example.com"; sleep 6;;
-            scam) open -a Safari "file://$PWD/scam.html"; sleep 6;;
-            website) open -a Safari "https://en.wikipedia.org/wiki/Main_Page"; sleep 6;;
+            safe) open -a "Google Chrome" --args --no-first-run --no-default-browser-check "https://example.com"; sleep 8;;
+            scam) open -a "Google Chrome" --args --no-first-run --no-default-browser-check "file://$PWD/scam.html"; sleep 8;;
+            website) open -a "Google Chrome" --args --no-first-run --no-default-browser-check "https://en.wikipedia.org/wiki/Main_Page"; sleep 8;;
+            learn) open -a "Google Chrome" --args --no-first-run --no-default-browser-check "about:blank"; sleep 8;;
+            printer) sudo lpadmin -p HP_DeskJet_2700 -D "HP DeskJet 2700" -E -v ipp://10.0.0.99/ipp/print -m drv:///sample.drv/generic.ppd && sudo cupsdisable HP_DeskJet_2700 && lpstat -p;;
             voice) say -o voice.aiff "Make the text on my screen bigger." && afconvert -f WAVE -d LEI16 voice.aiff voice.wav && launchctl setenv TECHSUPPORT_TEST_AUDIO "$PWD/voice.wav";;
           esac
       - name: Ask for help (Mac)
