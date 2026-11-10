@@ -85,7 +85,6 @@ fn key_of(name: &str) -> Option<Key> {
         "comma" => Key::Unicode(','),
         "period" => Key::Unicode('.'),
         "slash" => Key::Unicode('/'),
-        "insert" => Key::Insert,
         "f1" => Key::F1,
         "f2" => Key::F2,
         "f3" => Key::F3,
