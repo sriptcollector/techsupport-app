@@ -1,0 +1,153 @@
+name: Task test
+# Every scenario the website shows, on fresh Mac and Windows VMs, one VM per task: install with the
+# one-line installer, start the free week (staging's test checkout), then ask for help like a
+# person would. A scripted person presses only what a person would press (the helper does the work).
+# Screenshots every 2 s and the helper's step log go to a "tasks-<run>" pre-release.
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Release tag published to the test download channel
+        required: true
+permissions:
+  contents: write
+env:
+  STAGING: ${{ vars.TS_STAGING }}
+  TS_DOWNLOADS: https://storage.googleapis.com/westward-apps-prod-techsupport/downloads/test/${{ inputs.tag }}
+jobs:
+  task:
+    strategy:
+      fail-fast: false
+      max-parallel: 12
+      matrix:
+        os: [macos-latest, windows-latest]
+        task: [text, broken, voice, showme, safe, scam, learn, website, printer]
+        include:
+          - { os: macos-latest, task: text-2 }
+          - { os: macos-latest, task: broken-2 }
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
+    steps:
+      - name: Pick the task
+        shell: bash
+        run: |
+          case "${{ matrix.task }}" in
+            text|text-2) AP="how:Make the text on my screen bigger";;
+            broken|broken-2) AP="bug@Grocery:The words in this window are way too small. I can't read my list.";;
+            voice) AP="voice:";;
+            showme) AP="how:Show me how to make the text on my screen bigger. I want to click myself.";;
+            safe) AP="how:Is this site safe?";;
+            scam) AP="how:Is this pop-up a scam?";;
+            learn) AP="how:I want to learn how to code with Claude";;
+            website) AP="how:I don't know how to use this website. I want to read about the Moon.";;
+            printer) AP="how:My printer says offline";;
+          esac
+          echo "AP=$AP" >> $GITHUB_ENV
+          mkdir -p shots
+          cat > scam.html <<'EOS'
+          <!doctype html><title>Windows Security Alert</title><body style="background:#0a3d91;color:#fff;font:20px sans-serif;text-align:center;padding:60px">
+          <h1>&#9888; YOUR COMPUTER IS INFECTED</h1><p>Your files and bank details are at risk. Do not close this window.</p>
+          <p style="font-size:28px">Call Microsoft Support now: <b>1-888-555-0199</b></p><p>Error code: 0x80070424 &middot; Download the cleaner below</p><button style="font-size:22px;padding:12px 24px">Download Cleaner</button></body>
+          EOS
+
+      # ---------------- Windows ----------------
+      - name: Install like a customer (Windows)
+        if: runner.os == 'Windows'
+        shell: powershell
+        run: |
+          irm "$env:STAGING/install.ps1" | iex
+          Start-Sleep 8; Get-Process tech-support -ErrorAction SilentlyContinue | Stop-Process -Force
+      - name: Set the scene (Windows)
+        if: runner.os == 'Windows'
+        shell: powershell
+        run: |
+          switch -Wildcard ("${{ matrix.task }}") {
+            "broken*" { Set-Content "$env:TEMP\Grocery list.txt" "Milk`r`nEggs`r`nBread`r`nCall the pharmacy about the refill"; Start-Process notepad "$env:TEMP\Grocery list.txt"; Start-Sleep 3; Add-Type -AssemblyName System.Windows.Forms; 1..6 | % { [System.Windows.Forms.SendKeys]::SendWait('^{SUBTRACT}'); Start-Sleep -Milliseconds 200 } }
+            "safe" { Start-Process msedge "https://example.com"; Start-Sleep 6 }
+            "scam" { Start-Process msedge ("file:///" + (Resolve-Path scam.html).Path.Replace('\','/')); Start-Sleep 6 }
+            "website" { Start-Process msedge "https://en.wikipedia.org/wiki/Main_Page"; Start-Sleep 6 }
+            "voice" { Add-Type -AssemblyName System.Speech; $s = New-Object System.Speech.Synthesis.SpeechSynthesizer; $s.SetOutputToWaveFile("$PWD\voice.wav"); $s.Speak("Make the text on my screen bigger."); $s.Dispose(); Add-Content -Path $env:GITHUB_ENV -Value "TECHSUPPORT_TEST_AUDIO=$PWD\voice.wav" -Encoding ascii }
+          }
+      - name: Ask for help (Windows)
+        if: runner.os == 'Windows'
+        shell: powershell
+        env:
+          TEST_LOGIN: ${{ secrets.TS_STAGING_TEST_LOGIN }}
+        run: |
+          $n = "${{ github.run_number }}" + "${{ strategy.job-index }}" + "7"
+          $r = Invoke-RestMethod -Method Post -Uri "$env:STAGING/auth/test?n=$n" -Headers @{ 'x-test-login' = $env:TEST_LOGIN }
+          $env:TECHSUPPORT_TEST_SESSION = $r.token
+          $env:TECHSUPPORT_SERVER = $env:STAGING
+          $env:TECHSUPPORT_SHOW_IN_CAPTURE = '1'
+          $env:TECHSUPPORT_AUTOPILOT = $env:AP
+          $env:TECHSUPPORT_AUTOPILOT_LOG = "$PWD\shots\task.log"
+          @'
+          Add-Type -AssemblyName System.Windows.Forms,System.Drawing
+          $i = 0
+          while ($true) { $b = [System.Windows.Forms.Screen]::PrimaryScreen.Bounds; $bmp = New-Object System.Drawing.Bitmap $b.Width, $b.Height
+            [System.Drawing.Graphics]::FromImage($bmp).CopyFromScreen($b.Location, [System.Drawing.Point]::Empty, $b.Size); $bmp.Save(("shots\shot-{0:D3}.png" -f $i)); $bmp.Dispose(); $i++; Start-Sleep -Milliseconds 2000 }
+          '@ | Set-Content shoot.ps1
+          $shooter = Start-Process powershell -ArgumentList '-NoProfile','-File','shoot.ps1' -PassThru -WindowStyle Hidden
+          $app = Start-Process "$env:LOCALAPPDATA\Tech Support\tech-support.exe" -PassThru
+          $deadline = (Get-Date).AddMinutes(12)
+          while ((Get-Date) -lt $deadline) { Start-Sleep 3; if ((Test-Path $env:TECHSUPPORT_AUTOPILOT_LOG) -and (Select-String -Path $env:TECHSUPPORT_AUTOPILOT_LOG -Pattern 'DONE|PROBLEM|STOPPED' -Quiet)) { Start-Sleep 8; break } }
+          Stop-Process -Id $app.Id -Force -ErrorAction SilentlyContinue; Stop-Process -Id $shooter.Id -Force -ErrorAction SilentlyContinue
+          try { Invoke-RestMethod -Method Delete -Uri "$env:STAGING/api/ops/users/$([uri]::EscapeDataString($r.email))" -Headers @{ authorization = "Bearer $($r.token)" } | Out-Null } catch {}
+          if (Test-Path $env:TECHSUPPORT_AUTOPILOT_LOG) { Get-Content $env:TECHSUPPORT_AUTOPILOT_LOG | Select-String 'DONE|PROBLEM|STOPPED|tool error' }
+
+      # ---------------- Mac ----------------
+      - name: Install like a customer (Mac)
+        if: runner.os == 'macOS'
+        run: |
+          curl -fsSL "$STAGING/install.sh" | sh
+          sleep 6; pkill -f "Tech Support.app/Contents/MacOS" || true
+          APP=/Applications/"Tech Support.app"; [ -d "$APP" ] || APP="$HOME/Applications/Tech Support.app"
+          echo "APP=$APP" >> $GITHUB_ENV
+          BIN="$APP/Contents/MacOS/tech-support"
+          for db in "$HOME/Library/Application Support/com.apple.TCC/TCC.db" "/Library/Application Support/com.apple.TCC/TCC.db"; do
+            for svc in kTCCServiceScreenCapture kTCCServiceAccessibility kTCCServiceMicrophone kTCCServicePostEvent; do
+              sudo sqlite3 "$db" "INSERT OR REPLACE INTO access (service,client,client_type,auth_value,auth_reason,auth_version,flags) VALUES ('$svc','ai.westwardconsulting.techsupport',0,2,4,1,0);" 2>&1 || true
+              sudo sqlite3 "$db" "INSERT OR REPLACE INTO access (service,client,client_type,auth_value,auth_reason,auth_version,flags) VALUES ('$svc','$BIN',1,2,4,1,0);" 2>&1 || true
+            done
+          done
+          defaults write "$HOME/Library/Group Containers/group.com.apple.replayd/ScreenCaptureApprovals" "$BIN" -date "3024-01-01 00:00:00 +0000" || true
+      - name: Set the scene (Mac)
+        if: runner.os == 'macOS'
+        run: |
+          case "${{ matrix.task }}" in
+            broken*) printf '{\\rtf1\\ansi{\\fonttbl\\f0 Helvetica;}\\f0\\fs6 Milk\\par Eggs\\par Bread\\par Call the pharmacy about the refill}' > "$HOME/Desktop/Grocery list.rtf"; open -a TextEdit "$HOME/Desktop/Grocery list.rtf"; sleep 4;;
+            safe) open -a Safari "https://example.com"; sleep 6;;
+            scam) open -a Safari "file://$PWD/scam.html"; sleep 6;;
+            website) open -a Safari "https://en.wikipedia.org/wiki/Main_Page"; sleep 6;;
+            voice) say -o voice.aiff "Make the text on my screen bigger." && afconvert -f WAVE -d LEI16 voice.aiff voice.wav && launchctl setenv TECHSUPPORT_TEST_AUDIO "$PWD/voice.wav";;
+          esac
+      - name: Ask for help (Mac)
+        if: runner.os == 'macOS'
+        env:
+          TEST_LOGIN: ${{ secrets.TS_STAGING_TEST_LOGIN }}
+        run: |
+          n="${{ github.run_number }}${{ strategy.job-index }}7"
+          R=$(curl -fsS -X POST -d "" "$STAGING/auth/test?n=$n" -H "x-test-login: $TEST_LOGIN")
+          TOKEN=$(echo "$R" | python3 -c 'import sys,json;print(json.load(sys.stdin)["token"])')
+          EMAIL=$(echo "$R" | python3 -c 'import sys,json,urllib.parse;print(urllib.parse.quote(json.load(sys.stdin)["email"]))')
+          launchctl setenv TECHSUPPORT_TEST_SESSION "$TOKEN"; launchctl setenv TECHSUPPORT_SERVER "$STAGING"; launchctl setenv TECHSUPPORT_SHOW_IN_CAPTURE 1
+          launchctl setenv TECHSUPPORT_AUTOPILOT "$AP"; LOG="$PWD/shots/task.log"; launchctl setenv TECHSUPPORT_AUTOPILOT_LOG "$LOG"
+          ( i=0; while true; do screencapture -x "shots/shot-$(printf %03d $i).png"; i=$((i+1)); sleep 2; done ) & SHOOT=$!
+          open "$APP"
+          end=$(( $(date +%s) + 720 ))
+          while [ $(date +%s) -lt $end ]; do sleep 3; grep -qE 'DONE|PROBLEM|STOPPED' "$LOG" 2>/dev/null && { sleep 8; break; }; done
+          pkill -f "Tech Support.app/Contents/MacOS" || true; kill $SHOOT || true
+          curl -fsS -X DELETE "$STAGING/api/ops/users/$EMAIL" -H "authorization: Bearer $TOKEN" || true
+          grep -E 'DONE|PROBLEM|STOPPED|tool error' "$LOG" || true
+
+      - name: Attach screenshots
+        if: always()
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          tag="tasks-${GITHUB_RUN_NUMBER}"; name="${{ runner.os }}-${{ matrix.task }}"
+          gh release view "$tag" -R "$GITHUB_REPOSITORY" >/dev/null 2>&1 || gh release create "$tag" -R "$GITHUB_REPOSITORY" --prerelease --title "Task test ${GITHUB_RUN_NUMBER}" --notes "One VM per task" || true
+          cp shots/task.log "$name.log" 2>/dev/null || echo "no log" > "$name.log"
+          if [ "${{ runner.os }}" = "Windows" ]; then 7z a -tzip "$name.zip" ./shots/* >/dev/null; else (cd shots && zip -qr "../$name.zip" .); fi
+          gh release upload "$tag" -R "$GITHUB_REPOSITORY" "$name.zip" "$name.log" --clobber

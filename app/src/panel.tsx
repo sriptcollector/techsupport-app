@@ -145,7 +145,11 @@ export function Panel() {
         bugWords.current.push(e.payload);
         say("me", e.payload.text, e.payload.pin);
       }),
-      listen<{ app: string }>("ov:picked", (e) => say("bot", `Got it: ${e.payload.app}. Show me and tell me what's wrong.`)),
+      listen<{ app: string; x: number; w: number }>("ov:picked", (e) => {
+        say("bot", `Got it: ${e.payload.app}. Show me and tell me what's wrong.`);
+        // Keep the chat off the window they picked.
+        invoke("panel_away", { x: e.payload.x, w: e.payload.w });
+      }),
       listen<{ region: [number, number, number, number]; app: string; pins: any[]; strokes: [number, number][][] }>("ov:bugdone", (e) => startFix(e.payload)),
     ];
     getEnv().then((env) => register(env.os === "mac" ? "Control+Alt+T" : "Control+Alt+T", (e) => e.state === "Pressed" && emitTo("panel", "panel-toggle", true)).catch(() => {}));
@@ -222,22 +226,13 @@ export function Panel() {
   // The agent asks the panel to show things through this.
   const ui = {
     settings: () => meRef.current!.settings,
-    plan: (understood: string, steps: string[]) =>
-      new Promise<Pick | string>((resolve) => {
-        say("bot", understood);
-        setCard({ kind: "plan", understood, steps, fix: session.current?.mode === "fix" });
-        speak(understood, meRef.current?.settings);
-        waiter.current = (t: string) => {
-          setCard(null);
-          const l = t.toLowerCase();
-          resolve(/show me|i'?ll click/.test(l) ? "show" : /steps|tell me/.test(l) ? "steps" : /^(yes|ok|okay|sure|do it|fix it|go)|for me/.test(l) ? "do" : t);
-        };
-        pickRef.current = (p: Pick) => {
-          waiter.current = null;
-          setCard(null);
-          resolve(p);
-        };
-      }),
+    plan: async (understood: string, steps: string[]) => {
+      // The helper does the work; the plan is shown and it starts right away (least decisions).
+      say("bot", understood);
+      setCard({ kind: "plan", understood, steps, fix: session.current?.mode === "fix" });
+      speak(understood, meRef.current?.settings);
+      return "do" as Pick;
+    },
     ask: (question: string, options: string[]) =>
       new Promise<string>((resolve) => {
         say("bot", question);
@@ -402,13 +397,13 @@ export function Panel() {
       const kind = head.split("@")[0];
       const words = rest.join(":");
       if (view === "welcome") once("welcome", 3500, () => (localStorage.setItem("ts_seen", "1"), setView("signin")));
-      if (view === "home") once("start", 4000, () => (kind === "bug" ? startBug() : startHow(words)));
+      if (view === "home") once("start", 4000, () => (kind === "bug" ? startBug() : kind === "voice" ? startHow() : startHow(words)));
       if (view === "bug") once("bugwords", 7000, () => {
         emitTo("overlay", "ov:words", { text: words, at: Date.now() });
         setTimeout(() => emitTo("overlay", "ov:words", { text: "That's all.", at: Date.now() }), 2500);
         setTimeout(() => emitTo("overlay", "ov:finish-bug", {}), 4000);
       });
-      if (card?.kind === "plan") once(`plan${lines.length}`, 3000, () => pickRef.current("do"));
+      if (card?.kind === "plan" && kind === "showme") once("showme", 500, () => session.current?.showMe());
       if (card?.kind === "ask") once(`ask${lines.length}`, 3000, () => heard(card.options[0]));
       if (card?.kind === "done") {
         apLog(`DONE worked=${card.worked} outcome=${card.outcome}`);
@@ -442,9 +437,10 @@ export function Panel() {
         </div>
       </div>
     );
-  if (view === "signin") return <SignIn progress={progressBar(1)} onDone={() => (track("sign_up"), route(true))} />;
-  if (view === "trial") return <Trial progress={progressBar(2)} me={me} onDone={() => route(true)} />;
-  if (view === "perms") return <Perms progress={progressBar(3)} onDone={() => show("home")} />;
+  if (view === "signin")
+    return <SignIn progress={progressBar(1)} who={me?.email ?? null} onBack={() => setView("welcome")} onSignOut={async () => (await setToken(null), setMe(null))} onDone={() => (track("sign_up"), route(true))} />;
+  if (view === "trial") return <Trial progress={progressBar(2)} me={me} onBack={() => setView("signin")} onDone={() => route(true)} />;
+  if (view === "perms") return <Perms progress={progressBar(3)} onBack={() => setView(me?.canUse ? "signin" : "trial")} onDone={() => show("home")} />;
   if (view === "settings") return <Settings me={me!} onBack={() => show("home")} onChange={setMe} onSignOut={async () => (await setToken(null), setMe(null), show("signin"))} />;
 
   if (view === "home")
@@ -498,7 +494,7 @@ export function Panel() {
   return (
     <div className="panel">
       <div className="drag row" data-tauri-drag-region style={{ justifyContent: "flex-end", padding: "4px 8px 0" }}>
-        <button className="link" style={{ fontSize: 14, padding: 4 }} onClick={() => (micOff(), hush(), session.current?.end(), overlayMode(false), emitTo("overlay", "ov:mode", { mode: "off" }), show("home"))}>Close</button>
+        <button className="link" style={{ fontSize: 14, padding: 4 }} onClick={() => (micOff(), hush(), session.current?.end(), overlayMode(false), emitTo("overlay", "ov:mode", { mode: "off" }), show("home"))}>← Back</button>
       </div>
       <div className="body" style={{ paddingTop: 0 }}>
         <div className="chat" aria-live="polite">
@@ -522,11 +518,7 @@ export function Panel() {
           {plan && (
             <div className="plan">
               <ol>{plan.steps.map((s, i) => <li key={i}>{s}</li>)}</ol>
-              <div className="chips" style={{ marginTop: 12 }}>
-                <button className="chip rec" autoFocus onClick={() => pickRef.current("do")}>{plan.fix ? "Fix it for me" : "Do it for me"}<span className="tag">Recommended</span></button>
-                <button className="chip" onClick={() => pickRef.current("show")}>{plan.fix ? "Show me how" : "Show me, I'll click"}</button>
-                <button className="chip" onClick={() => pickRef.current("steps")}>{plan.fix ? "Tell me what's wrong" : "Just tell me the steps"}</button>
-              </div>
+              <button className="link" style={{ fontSize: 14, padding: "8px 0 0" }} onClick={() => session.current?.showMe()}>Let me do it myself</button>
               <p className="small" style={{ margin: "10px 0 0" }}>Nothing happens until you choose. Press Stop or move your mouse and I stop at once. I never touch passwords or bank pages.</p>
               {plan.steps.length <= 10 && <p className="small" style={{ margin: "6px 0 0" }}>{plan.steps.length * 13 < 50 ? `About ${Math.ceil((plan.steps.length * 13) / 10) * 10} seconds.` : plan.steps.length * 13 < 90 ? "About a minute." : `About ${Math.round((plan.steps.length * 13) / 60)} minutes.`}</p>}
             </div>
@@ -556,7 +548,7 @@ export function Panel() {
               <div className="chips" style={{ marginTop: 12 }}>
                 <button className="chip rec" autoFocus onClick={() => (track("fix_confirmed", { yes: true }), say("bot", "Glad I could help."), speak("Glad I could help.", me?.settings), setCard(null), setTimeout(() => win.hide(), 2000))}>Yes, all good<span className="tag">Recommended</span></button>
                 <button className="chip" onClick={() => (setCard(null), track("fix_confirmed", { yes: false }), say("bot", "What's still wrong?"), ensureMic(heard))}>No, still wrong</button>
-                <button className="chip" onClick={() => (setCard(null), say("me", "Undo that"), session.current?.more("Please undo everything you changed in this session, in reverse order, saying each step. Then call done."))}>Undo that</button>
+                <button className="chip" onClick={() => (setCard(null), say("me", "Undo that"), session.current?.more(session.current.undoPrompt()))}>Undo that</button>
               </div>
               )}
             </div>
@@ -566,7 +558,7 @@ export function Panel() {
               <h2>Stopped. Nothing else will happen.</h2>
               <div className="chips" style={{ marginTop: 12 }}>
                 <button className="chip rec" autoFocus onClick={() => (setCard(null), overlayMode(false), session.current?.more("Keep going from where things are now. Take a screenshot first."))}>Keep going<span className="tag">Recommended</span></button>
-                <button className="chip" onClick={() => (setCard(null), session.current?.more("Please undo what you changed, in reverse order. Then call done."))}>Undo what you did</button>
+                <button className="chip" onClick={() => (setCard(null), session.current?.more(session.current.undoPrompt()))}>Undo what you did</button>
                 <button className="chip" onClick={() => (setCard(null), overlayMode(false), session.current?.end(), show("home"))}>I'm done</button>
               </div>
             </div>
@@ -596,13 +588,24 @@ export function Panel() {
   );
 }
 
+// Every setup step has a visible Back that keeps what was entered (Orion, 2026-11-10).
+const Back = ({ onClick }: { onClick: () => void }) => (
+  <button type="button" className="link back" onClick={onClick} aria-label="Back">
+    ← Back
+  </button>
+);
+
 // ---------- S3 sign in ----------
-function SignIn({ progress, onDone }: { progress: React.ReactNode; onDone: () => void }) {
+function SignIn({ progress, onDone, onBack, who, onSignOut }: { progress: React.ReactNode; onDone: () => void; onBack: () => void; who: string | null; onSignOut: () => void }) {
   const [step, setStep] = useState<"choose" | "email" | "code" | "waiting">("choose");
   const [email, setEmail] = useState("");
   const [code, setCode] = useState("");
   const [err, setErr] = useState("");
   const [busy, setBusy] = useState(false);
+  const [googleOn, setGoogleOn] = useState(true);
+  useEffect(() => {
+    api<{ google: boolean }>("/api/config").then((c) => setGoogleOn(c.google)).catch(() => {});
+  }, []);
   async function google() {
     setStep("waiting");
     try {
@@ -642,8 +645,17 @@ function SignIn({ progress, onDone }: { progress: React.ReactNode; onDone: () =>
       <div className="drag" data-tauri-drag-region />
       {progress}
       <div className="body center">
+        <Back onClick={() => (step === "code" ? setStep("email") : step === "email" || step === "waiting" ? setStep("choose") : onBack())} />
         <Bot expr={step === "waiting" ? "waiting" : "idle"} size={56} />
-        {step === "waiting" ? (
+        {who && step === "choose" ? (
+          <>
+            <h1>You're signed in</h1>
+            <p>{who}</p>
+            <div className="grow" />
+            <button className="btn primary full" autoFocus onClick={onDone}>Continue</button>
+            <button className="link" onClick={onSignOut}>Use a different account</button>
+          </>
+        ) : step === "waiting" ? (
           <>
             <h1>Finish signing in in your browser</h1>
             <p>Then come back here.</p>
@@ -653,10 +665,16 @@ function SignIn({ progress, onDone }: { progress: React.ReactNode; onDone: () =>
           <>
             <h1>Sign in to keep your help in one place</h1>
             <div className="grow" />
-            <button className="btn full" autoFocus onClick={google}>
-              <GoogleG /> Continue with Google
-            </button>
-            <button className="link" onClick={() => setStep("email")}>Use my email instead</button>
+            {googleOn ? (
+              <>
+                <button className="btn full" autoFocus onClick={google}>
+                  <GoogleG /> Continue with Google
+                </button>
+                <button className="link" onClick={() => setStep("email")}>Use my email instead</button>
+              </>
+            ) : (
+              <button className="btn primary full" autoFocus onClick={() => setStep("email")}>Email me a sign-in code</button>
+            )}
             <p className="small" style={{ margin: "8px 0 0" }}>We only see your name and email. Never your passwords or mail.</p>
           </>
         ) : step === "email" ? (
@@ -667,7 +685,6 @@ function SignIn({ progress, onDone }: { progress: React.ReactNode; onDone: () =>
             {err && <p className="err">{err}</p>}
             <div style={{ height: 8 }} />
             <button className="btn primary full" disabled={busy || !email.includes("@")}>{busy ? "Sending…" : "Send me a code"}</button>
-            <button type="button" className="link" onClick={() => setStep("choose")}>Back</button>
           </form>
         ) : (
           <form className="stack" style={{ width: "100%", textAlign: "left" }} onSubmit={(e) => (e.preventDefault(), verify())}>
@@ -694,9 +711,9 @@ function SignIn({ progress, onDone }: { progress: React.ReactNode; onDone: () =>
 }
 
 // ---------- S4 free week (card first) ----------
-function Trial({ progress, me, onDone }: { progress: React.ReactNode; me: Me | null; onDone: () => void }) {
+function Trial({ progress, me, onDone, onBack }: { progress: React.ReactNode; me: Me | null; onDone: () => void; onBack: () => void }) {
   const [plan, setPlan] = useState<"yearly" | "monthly">("yearly");
-  const [state, setState] = useState<"idle" | "opening" | "waiting" | "soon" | "error">("idle");
+  const [state, setState] = useState<"idle" | "opening" | "waiting" | "error">("idle");
   const used = me?.hadTrial;
   useEffect(() => {
     if (state !== "waiting") return;
@@ -717,8 +734,7 @@ function Trial({ progress, me, onDone }: { progress: React.ReactNode; me: Me | n
     setState("opening");
     track("begin_checkout", { plan });
     try {
-      const r = await api<{ url?: string; soon?: boolean }>("/api/checkout", { plan, from: "app" });
-      if (r.soon) return setState("soon");
+      const r = await api<{ url: string }>("/api/checkout", { plan, from: "app" });
       const url = r.url!.startsWith("/") ? (await server()) + r.url : r.url!;
       await openUrl(url);
       setState("waiting");
@@ -734,6 +750,7 @@ function Trial({ progress, me, onDone }: { progress: React.ReactNode; me: Me | n
       <div className="drag" data-tauri-drag-region />
       {progress}
       <div className="body center">
+        <Back onClick={state === "waiting" ? () => setState("idle") : onBack} />
         <h1>{used ? "Keep your help going" : "Free for 7 days"}</h1>
         <div className="stack" style={{ width: "100%", margin: "8px 0 16px" }} role="radiogroup" aria-label="Plan">
           <button role="radio" aria-checked={plan === "yearly"} className={`chip${plan === "yearly" ? " rec" : ""}`} onClick={() => setPlan("yearly")}>
@@ -752,8 +769,6 @@ function Trial({ progress, me, onDone }: { progress: React.ReactNode; me: Me | n
         <div className="grow" />
         {state === "waiting" ? (
           <p>A page opened in your web browser to add your card. Come back here when it's done; I'll move on by myself.</p>
-        ) : state === "soon" ? (
-          <p>The free week opens very soon. We'll email you the moment it does.</p>
         ) : (
           <button className="btn primary full" autoFocus disabled={state === "opening"} onClick={start}>{used ? "Start my plan" : "Start my free week"}</button>
         )}
@@ -767,7 +782,7 @@ function Trial({ progress, me, onDone }: { progress: React.ReactNode; me: Me | n
 }
 
 // ---------- S6 the one permission step (Mac) ----------
-function Perms({ progress, onDone }: { progress: React.ReactNode; onDone: () => void }) {
+function Perms({ progress, onDone, onBack }: { progress: React.ReactNode; onDone: () => void; onBack: () => void }) {
   const [p, setP] = useState({ mic: false, screen: false, control: false });
   const [going, setGoing] = useState(false);
   useEffect(() => {
@@ -811,6 +826,7 @@ function Perms({ progress, onDone }: { progress: React.ReactNode; onDone: () => 
       <div className="drag" data-tauri-drag-region />
       {progress}
       <div className="body center">
+        <Back onClick={onBack} />
         <h1>{all ? "All set. That was the hard part." : "Let Tech Support see, hear and help"}</h1>
         <div style={{ width: "100%", margin: "8px 0 16px" }}>
           {row(p.mic, "Hear you", "Microphone")}

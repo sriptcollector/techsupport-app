@@ -50,7 +50,10 @@ export function Report() {
     setState("sending");
     const env = await getEnv();
     try {
-      const r = await api<Result>("/api/report", { text, os: env.os, version: env.version, include });
+      // "Include what happened last time": the last help's step list (the undo journal), never a screenshot here.
+      const last = include ? JSON.parse(localStorage.getItem("ts_last_journal") ?? "null") : null;
+      const log = last ? [`Task: ${last.task}`, ...last.entries.map((e: any) => (e.said ? `said: ${e.said}` : `did: ${e.did}`))] : [];
+      const r = await api<Result>("/api/report", { text, os: env.os, version: env.version, include, log });
       setRes(r);
       track("report_sent", { kind: r.kind });
     } catch {

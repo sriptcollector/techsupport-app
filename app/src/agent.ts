@@ -3,7 +3,7 @@
 // the mouse, presses Esc, says "stop", or presses Stop.
 import { emitTo } from "@tauri-apps/api/event";
 import { register, unregister } from "@tauri-apps/plugin-global-shortcut";
-import { act, apLog, api, ApiError, capture, cursor, getEnv, hush, speak, track, type Me, type Shot } from "./api";
+import { act, apLog, api, autopilot, ApiError, capture, cursor, getEnv, hush, speak, track, type Me, type Shot } from "./api";
 import type { Expr } from "./bot";
 
 export type Pick = "do" | "show" | "steps";
@@ -38,6 +38,22 @@ export class Session {
   n = 0;
   shot: Shot | null = null;
   pick: Pick = "do";
+  /** Undo journal: every change in order, so "Undo that" can reverse exactly what happened, even later. */
+  journal: { at: number; step: number; said?: string; did?: string }[] = [];
+  private note(entry: { said?: string; did?: string }) {
+    this.journal.push({ at: Date.now(), step: this.n, ...entry });
+    try {
+      localStorage.setItem("ts_last_journal", JSON.stringify({ task: this.task, os: navigator.platform, entries: this.journal.slice(-80) }));
+    } catch {}
+  }
+  journalText() {
+    return this.journal.map((j, i) => `${i + 1}. ${j.said ? `Said: "${j.said}"` : `Did: ${j.did}`}`).join(String.fromCharCode(10));
+  }
+  undoPrompt() {
+    return `Undo everything you changed in this help, in reverse order, saying each step. Here is exactly what happened:
+${this.journalText()}
+Only reverse real changes (settings, text, files). Then call done.`;
+  }
   private expected: [number, number] | null = null;
   private watching = 0;
   private busy = false;
@@ -86,8 +102,16 @@ export class Session {
     ov("ov:screen", { sw: this.shot.sw, sh: this.shot.sh });
     this.messages.push({ role: "user", content: [{ type: "text", text: firstText }, ...extra, { type: "image", source: { type: "base64", media_type: "image/jpeg", data: this.shot.data } }] });
     this.task = firstText.slice(0, 60);
+    if (/show me (how|where)|let me (click|do it)|do it myself/i.test(firstText)) this.pick = "show";
     track("help_started", { mode: this.mode, os: env.os });
     await this.loop();
+  }
+
+  /** "Let me do it myself": from the next step on, the helper points and the person clicks. */
+  private wantShow = false;
+  showMe() {
+    this.wantShow = true;
+    this.pick = "show";
   }
 
   /** The person said or typed something more (an answer, or "No, still wrong"). */
@@ -154,6 +178,10 @@ export class Session {
           }
         }
       }
+      if (this.wantShow) {
+        this.wantShow = false;
+        results.push({ type: "text", text: "They'd like to do it themselves now. From here on don't click or type: point with mouse_move and use needs_you for each step." });
+      }
       this.messages.push({ role: "user", content: results });
       if (finished || this.aborted) return;
     }
@@ -169,10 +197,10 @@ export class Session {
         ov("ov:expr", { expr: "idle" });
         const pick = await this.ui.plan(i.understood, i.steps ?? []);
         if (pick === "do" || pick === "show" || pick === "steps") {
-          this.pick = pick;
+          if (this.pick !== "show") this.pick = pick;
           track("plan_picked", { pick });
           if (pick !== "steps") this.beginWalk();
-          return pick === "do" ? 'They picked "Do it for me".' : pick === "show" ? 'They picked "Show me, I\'ll click". Point with mouse_move and needs_you; don\'t click.' : 'They picked "Just tell me the steps". Call done with the steps; don\'t touch anything.';
+          return pick === "do" ? "The plan is on their screen. Carry on with the first step now." : pick === "show" ? 'They picked "Show me, I\'ll click". Point with mouse_move and needs_you; don\'t click.' : 'They picked "Just tell me the steps". Call done with the steps; don\'t touch anything.';
         }
         return `They didn't pick yet. They said: "${pick}"`;
       }
@@ -188,6 +216,7 @@ export class Session {
         await Promise.race([speak(i.text, s), new Promise<void>((r) => this.stopWaiters.push(r))]);
         clearInterval(t);
         ov("ov:say", { text: i.text, spoken: words });
+        this.note({ said: i.text });
         return "OK";
       }
       case "ask": {
@@ -222,6 +251,11 @@ export class Session {
         this.ui.needsYou(i.text);
         clearInterval(this.watching); // the person is meant to use the mouse now
         const before = hash((await capture(undefined, 320)).data);
+        // CI only: the scripted person does what the helper points at.
+        if (this.pick === "show" && (await autopilot()) && this.expected) {
+          const [px, py] = this.expected;
+          setTimeout(() => act({ do: "click", x: px, y: py }).catch(() => {}), 2500);
+        }
         await new Promise<void>((resolve) => {
           const iv = setInterval(async () => {
             if (this.aborted) return clearInterval(iv), resolve();
@@ -294,6 +328,7 @@ export class Session {
   }
 
   private async computer(name: string, i: any): Promise<any> {
+    if (!/screenshot|zoom|wait|cursor_position|mouse_move/.test(name)) this.note({ did: `${name} ${JSON.stringify(i)}` });
     if (this.pick !== "do" && /click|drag|type|key|scroll|mouse_down|mouse_up/.test(name)) throw new Error("In this mode don't click or type. Use mouse_move and needs_you.");
     if (this.needConfirm && /click|key|type/.test(name)) {
       this.needConfirm = false;

@@ -170,7 +170,7 @@ export function Overlay() {
     setRegion(w);
     setMode("mark");
     setExpr("listening");
-    emitTo("panel", "ov:picked", { app: w.app || w.title });
+    emitTo("panel", "ov:picked", { app: w.app || w.title, x: w.x, w: w.w });
   }
   function redraw(all: Stroke[]) {
     const c = canvas.current;
@@ -199,7 +199,7 @@ export function Overlay() {
       const w = (hint && wins.find((x) => `${x.app} ${x.title}`.toLowerCase().includes(hint))) || winAt(...c) || whole();
       setRegion(w);
       setMode("mark");
-      emitTo("panel", "ov:picked", { app: w.app || w.title });
+      emitTo("panel", "ov:picked", { app: w.app || w.title, x: w.x, w: w.w });
       setPins([{ n: 1, x: w.x + w.w / 2, y: w.y + w.h / 2, at: Date.now() }]);
     };
     document.addEventListener("ap-pick", f);

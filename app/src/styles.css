@@ -154,3 +154,5 @@ textarea.field { height: 110px; padding: 12px 14px; resize: none; line-height: 2
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { animation-duration: 1ms !important; animation-iteration-count: 1 !important; transition-duration: 120ms !important; }
 }
+.back { align-self: flex-start; font-size: 15px; padding: 4px 0 8px; text-decoration: none; color: var(--ink-2); }
+.back:hover { color: var(--ink); text-decoration: underline; }

@@ -42,6 +42,14 @@ fn env_info(app: AppHandle) -> Env {
     }
 }
 
+/// CI consumer test only: a recorded voice stands in for the microphone (the test machines have none).
+#[tauri::command]
+fn test_audio() -> Option<String> {
+    use base64::Engine;
+    let path = std::env::var("TECHSUPPORT_TEST_AUDIO").ok()?;
+    std::fs::read(path).ok().map(|b| base64::engine::general_purpose::STANDARD.encode(b))
+}
+
 /// CI consumer test only: the scripted "person" writes what happened to a log the workflow reads.
 #[tauri::command]
 fn autopilot_log(line: String) {
@@ -160,6 +168,21 @@ fn place_panel(app: AppHandle, width: f64, height: f64) {
     let _ = w.set_position(pos);
 }
 
+/// Bug mode: moves the panel to the screen edge farthest from the window the person picked.
+#[tauri::command]
+fn panel_away(app: AppHandle, x: f64, w: f64) {
+    let Some(p) = app.get_webview_window("panel") else { return };
+    let Ok(Some(mon)) = p.primary_monitor() else { return };
+    let scale = mon.scale_factor();
+    let (mw, mh) = (mon.size().width as f64 / scale, mon.size().height as f64 / scale);
+    let Ok(sz) = p.outer_size() else { return };
+    let (pw, ph) = (sz.width as f64 / scale, sz.height as f64 / scale);
+    let left_room = x;
+    let right_room = mw - (x + w);
+    let px = if right_room >= left_room { mw - pw - 12.0 } else { 12.0 };
+    let _ = p.set_position(tauri::LogicalPosition::new(px.max(0.0), ((mh - ph) / 2.0).max(8.0)));
+}
+
 /// Covers the main screen with the see-through overlay. `interactive` = it takes clicks (bug mode).
 #[tauri::command]
 fn overlay_mode(app: AppHandle, visible: bool, interactive: bool) {
@@ -234,11 +257,13 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             env_info,
             autopilot_log,
+            test_audio,
             session_get,
             session_set,
             google_signin,
             place_panel,
             overlay_mode,
+            panel_away,
             screen::capture,
             screen::windows_list,
             input::act,

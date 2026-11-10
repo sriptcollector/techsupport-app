@@ -1,7 +1,20 @@
 // The microphone. It records while the person talks, cuts at the end of each thing they say
 // (1.2 s of quiet), and turns the audio into words on the server. Nothing is recorded while the mic
 // is off, and the operating system's own mic light shows when it's on.
+import { invoke } from "@tauri-apps/api/core";
 import { api } from "./api";
+
+// CI only: a recorded voice played into the same pipeline as a real microphone.
+async function testVoice(ctx: AudioContext): Promise<MediaStream | null> {
+  const b64 = await invoke<string | null>("test_audio").catch(() => null);
+  if (!b64) return null;
+  const bytes = Uint8Array.from(atob(b64), (c) => c.charCodeAt(0));
+  const el = new Audio(URL.createObjectURL(new Blob([bytes], { type: "audio/wav" })));
+  const dest = ctx.createMediaStreamDestination();
+  ctx.createMediaElementSource(el).connect(dest);
+  setTimeout(() => el.play().catch(() => {}), 1500);
+  return dest.stream;
+}
 
 export type Heard = { text: string; at: number };
 type Opts = { onLevel?: (l: number) => void; onSpeaking?: (on: boolean) => void; onWords: (h: Heard) => void; silenceMs?: number };
@@ -25,13 +38,18 @@ export class Mic {
 
   async start() {
     if (this.on) return true;
-    try {
-      this.stream = await navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true } });
-    } catch {
-      return false;
-    }
-    this.on = true;
     this.ctx = new AudioContext();
+    const recorded = await testVoice(this.ctx);
+    if (recorded) this.stream = recorded;
+    else
+      try {
+        this.stream = await navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true } });
+      } catch {
+        this.ctx.close();
+        this.ctx = null;
+        return false;
+      }
+    this.on = true;
     const src = this.ctx.createMediaStreamSource(this.stream);
     const an = this.ctx.createAnalyser();
     an.fftSize = 1024;
