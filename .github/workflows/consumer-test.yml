@@ -108,8 +108,8 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           tag="consumer-test-${GITHUB_RUN_NUMBER}"
-          gh release view "$tag" >/dev/null 2>&1 || gh release create "$tag" --prerelease --title "Consumer test ${GITHUB_RUN_NUMBER}" --notes "Screenshots every 2 seconds from the consumer test" || true
-          7z a -tzip windows-shots.zip ./shots/* >/dev/null && gh release upload "$tag" windows-shots.zip --clobber
+          gh release view "$tag" -R "$GITHUB_REPOSITORY" >/dev/null 2>&1 || gh release create "$tag" -R "$GITHUB_REPOSITORY" --prerelease --title "Consumer test ${GITHUB_RUN_NUMBER}" --notes "Screenshots every 2 seconds from the consumer test" || true
+          7z a -tzip windows-shots.zip ./shots/* >/dev/null && gh release upload "$tag" -R "$GITHUB_REPOSITORY" windows-shots.zip --clobber
 
   mac:
     runs-on: macos-latest
@@ -184,5 +184,5 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           tag="consumer-test-${GITHUB_RUN_NUMBER}"
-          gh release view "$tag" >/dev/null 2>&1 || gh release create "$tag" --prerelease --title "Consumer test ${GITHUB_RUN_NUMBER}" --notes "Screenshots every 2 seconds from the consumer test" || true
-          mkdir -p shots && cd shots && zip -qr ../mac-shots.zip . && cd .. && gh release upload "$tag" mac-shots.zip --clobber
+          gh release view "$tag" -R "$GITHUB_REPOSITORY" >/dev/null 2>&1 || gh release create "$tag" -R "$GITHUB_REPOSITORY" --prerelease --title "Consumer test ${GITHUB_RUN_NUMBER}" --notes "Screenshots every 2 seconds from the consumer test" || true
+          mkdir -p shots && cd shots && zip -qr ../mac-shots.zip . && cd .. && gh release upload "$tag" -R "$GITHUB_REPOSITORY" mac-shots.zip --clobber
