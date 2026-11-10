@@ -1,0 +1,63 @@
+name: Release
+# Builds Tech Support for Mac (one universal app) and Windows (per-user installer, no admin prompt)
+# and attaches them to a GitHub Release. deploy/publish.mjs copies them to the downloads bucket.
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+permissions:
+  contents: write
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: macos-latest
+            out: Tech-Support-mac.zip
+          - os: windows-latest
+            out: Tech-Support-Setup.exe
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 50
+    env:
+      TS_SERVER: ${{ vars.TS_SERVER }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2
+      - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable
+        with:
+          targets: ${{ runner.os == 'macOS' && 'aarch64-apple-darwin,x86_64-apple-darwin' || 'x86_64-pc-windows-msvc' }}
+      - name: Unit tests (hard blocks)
+        working-directory: app/src-tauri
+        shell: bash
+        run: mkdir -p ../dist && touch ../dist/index.html && cargo test --lib
+      - name: Build
+        working-directory: app
+        shell: bash
+        run: |
+          bun install --frozen-lockfile
+          if [ "${{ runner.os }}" = "macOS" ]; then
+            ./node_modules/.bin/tauri build --target universal-apple-darwin --bundles app
+          else
+            ./node_modules/.bin/tauri build --bundles nsis
+          fi
+      - name: Package
+        shell: bash
+        run: |
+          mkdir -p out
+          if [ "${{ runner.os }}" = "Windows" ]; then
+            cp app/src-tauri/target/release/bundle/nsis/*-setup.exe "out/${{ matrix.out }}"
+          else
+            APP="app/src-tauri/target/universal-apple-darwin/release/bundle/macos/Tech Support.app"
+            codesign --verify --deep --strict "$APP"
+            ditto -c -k --keepParent "$APP" "out/${{ matrix.out }}"
+          fi
+          cd out && (sha256sum "${{ matrix.out }}" 2>/dev/null || shasum -a 256 "${{ matrix.out }}") > "${{ matrix.out }}.sha256"
+      - name: Attach to release
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          tag="${GITHUB_REF_NAME}"; [ "${GITHUB_REF_TYPE}" = "tag" ] || tag="build-${GITHUB_RUN_NUMBER}"
+          gh release view "$tag" >/dev/null 2>&1 || gh release create "$tag" --title "Tech Support $tag" --notes "Desktop builds" --prerelease || true
+          gh release upload "$tag" out/* --clobber

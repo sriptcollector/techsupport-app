@@ -1,0 +1,42 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "productName": "Tech Support",
+  "mainBinaryName": "tech-support",
+  "version": "0.1.2",
+  "identifier": "ai.westwardconsulting.techsupport",
+  "build": {
+    "beforeDevCommand": "bun run dev",
+    "devUrl": "http://localhost:5175",
+    "beforeBuildCommand": "bun run build",
+    "frontendDist": "../dist"
+  },
+  "app": {
+    "macOSPrivateApi": true,
+    "withGlobalTauri": false,
+    "windows": [
+      { "label": "panel", "url": "index.html?view=panel", "title": "Tech Support", "width": 560, "height": 640, "center": true, "decorations": false, "transparent": true, "resizable": false, "alwaysOnTop": true, "skipTaskbar": true, "visible": false, "shadow": true },
+      { "label": "overlay", "url": "index.html?view=overlay", "title": "Tech Support helper", "width": 800, "height": 600, "decorations": false, "transparent": true, "resizable": false, "alwaysOnTop": true, "skipTaskbar": true, "visible": false, "focus": false, "shadow": false, "visibleOnAllWorkspaces": true },
+      { "label": "report", "url": "index.html?view=report", "title": "Report a bug", "width": 560, "height": 480, "center": true, "decorations": false, "transparent": true, "resizable": false, "alwaysOnTop": true, "skipTaskbar": true, "visible": false, "shadow": true }
+    ],
+    "security": {
+      "csp": "default-src 'self'; img-src 'self' data: blob:; media-src 'self' blob: mediastream:; style-src 'self' 'unsafe-inline'; connect-src 'self' ipc: http://ipc.localhost https://techsupport.westwardconsulting.ai https://techsupport-staging.westwardconsulting.ai https://*.run.app"
+    }
+  },
+  "bundle": {
+    "active": true,
+    "targets": ["nsis", "app"],
+    "publisher": "Westward",
+    "homepage": "https://techsupport.westwardconsulting.ai",
+    "category": "Utility",
+    "shortDescription": "Tech Support by Westward",
+    "icon": ["icons/32x32.png", "icons/128x128.png", "icons/128x128@2x.png", "icons/icon.icns", "icons/icon.ico"],
+    "macOS": {
+      "minimumSystemVersion": "12.0",
+      "signingIdentity": "-",
+      "infoPlist": "Info.plist"
+    },
+    "windows": {
+      "nsis": { "installMode": "currentUser", "displayLanguageSelector": false }
+    }
+  }
+}

@@ -1,0 +1,188 @@
+name: Consumer test
+# The real installed app on fresh Mac and Windows VMs, used like a person who knows nothing about
+# computers: install with the one-line installer, first launch, start the free week (staging's test
+# checkout), then "I don't know how to do something" (light mode) and "Something is broken" (dark
+# mode). A scripted person presses the recommended buttons; the AI does the real clicking.
+# Screenshots every 2 seconds are attached to a "consumer-test-<run>" pre-release.
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Release tag published to the test download channel
+        required: true
+      how:
+        description: What the person asks for help with
+        default: Make the text on my screen bigger
+permissions:
+  contents: write
+env:
+  STAGING: ${{ vars.TS_STAGING }}
+  TS_DOWNLOADS: https://storage.googleapis.com/westward-apps-prod-techsupport/downloads/test/${{ inputs.tag }}
+jobs:
+  windows:
+    runs-on: windows-latest
+    timeout-minutes: 45
+    steps:
+      - name: Install like a customer
+        shell: powershell
+        run: |
+          irm "$env:STAGING/install.ps1" | iex
+          Start-Sleep 8
+          Get-Process tech-support -ErrorAction SilentlyContinue | Stop-Process -Force
+          Test-Path "$env:LOCALAPPDATA\Tech Support\tech-support.exe"
+      - name: Screenshot helper
+        shell: powershell
+        run: |
+          New-Item -ItemType Directory -Force shots | Out-Null
+          @'
+          param($phase)
+          Add-Type -AssemblyName System.Windows.Forms,System.Drawing
+          $i = 0
+          while ($true) {
+            $b = [System.Windows.Forms.Screen]::PrimaryScreen.Bounds
+            $bmp = New-Object System.Drawing.Bitmap $b.Width, $b.Height
+            [System.Drawing.Graphics]::FromImage($bmp).CopyFromScreen($b.Location, [System.Drawing.Point]::Empty, $b.Size)
+            $bmp.Save(("shots\win-{0}-{1:D3}.png" -f $phase, $i)); $bmp.Dispose(); $i++
+            Start-Sleep -Milliseconds 2000
+          }
+          '@ | Set-Content shoot.ps1
+          @'
+          param($phase, $autopilot, $n, $minutes)
+          $exe = "$env:LOCALAPPDATA\Tech Support\tech-support.exe"
+          if ($n) {
+            $r = Invoke-RestMethod -Method Post -Uri "$env:STAGING/auth/test?n=$n" -Headers @{ 'x-test-login' = $env:TEST_LOGIN }
+            $env:TECHSUPPORT_TEST_SESSION = $r.token
+          } else { Remove-Item Env:TECHSUPPORT_TEST_SESSION -ErrorAction SilentlyContinue }
+          $env:TECHSUPPORT_SERVER = $env:STAGING
+          $env:TECHSUPPORT_SHOW_IN_CAPTURE = '1'
+          $env:TECHSUPPORT_AUTOPILOT = $autopilot
+          $env:TECHSUPPORT_AUTOPILOT_LOG = "$PWD\shots\win-$phase.log"
+          $shooter = Start-Process powershell -ArgumentList '-NoProfile','-File','shoot.ps1',$phase -PassThru -WindowStyle Hidden
+          $app = Start-Process $exe -PassThru
+          $deadline = (Get-Date).AddMinutes($minutes)
+          while ((Get-Date) -lt $deadline) {
+            Start-Sleep 3
+            if ((Test-Path $env:TECHSUPPORT_AUTOPILOT_LOG) -and (Select-String -Path $env:TECHSUPPORT_AUTOPILOT_LOG -Pattern 'DONE|PROBLEM|STOPPED' -Quiet)) { Start-Sleep 8; break }
+          }
+          Stop-Process -Id $app.Id -Force -ErrorAction SilentlyContinue
+          Stop-Process -Id $shooter.Id -Force -ErrorAction SilentlyContinue
+          if (Test-Path $env:TECHSUPPORT_AUTOPILOT_LOG) { Get-Content $env:TECHSUPPORT_AUTOPILOT_LOG }
+          '@ | Set-Content run.ps1
+      - name: First launch (light)
+        shell: powershell
+        run: .\run.ps1 -phase 1-first -autopilot "none" -n "" -minutes 0.4
+      - name: I don't know how to do something (light)
+        shell: powershell
+        env:
+          TEST_LOGIN: ${{ secrets.TS_STAGING_TEST_LOGIN }}
+        run: .\run.ps1 -phase 2-how -autopilot "how:${{ inputs.how }}" -n "${{ github.run_number }}1" -minutes 8
+      - name: Something is broken (dark)
+        shell: powershell
+        env:
+          TEST_LOGIN: ${{ secrets.TS_STAGING_TEST_LOGIN }}
+        run: |
+          $p = 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Themes\Personalize'
+          New-Item -Force $p | Out-Null
+          Set-ItemProperty $p -Name AppsUseLightTheme -Value 0 -Type DWord
+          Set-ItemProperty $p -Name SystemUsesLightTheme -Value 0 -Type DWord
+          # Something broken: a note whose words are far too small to read.
+          Set-Content "$env:TEMP\Grocery list.txt" "Milk`r`nEggs`r`nBread`r`nCall the pharmacy about the refill"
+          Start-Process notepad "$env:TEMP\Grocery list.txt"; Start-Sleep 3
+          Add-Type -AssemblyName System.Windows.Forms
+          1..6 | ForEach-Object { [System.Windows.Forms.SendKeys]::SendWait('^{SUBTRACT}'); Start-Sleep -Milliseconds 200 }
+          .\run.ps1 -phase 3-broken -autopilot "bug:The words in this window are way too small. I can't read my list." -n "${{ github.run_number }}2" -minutes 8
+      - name: Delete the test accounts
+        if: always()
+        shell: powershell
+        env:
+          TEST_LOGIN: ${{ secrets.TS_STAGING_TEST_LOGIN }}
+        run: |
+          foreach ($n in "${{ github.run_number }}1", "${{ github.run_number }}2") {
+            try { $r = Invoke-RestMethod -Method Post -Uri "$env:STAGING/auth/test?n=$n" -Headers @{ 'x-test-login' = $env:TEST_LOGIN }
+              Invoke-RestMethod -Method Delete -Uri "$env:STAGING/api/ops/users/$([uri]::EscapeDataString($r.email))" -Headers @{ authorization = "Bearer $($r.token)" } | Out-Null } catch {}
+          }
+      - name: Attach screenshots
+        if: always()
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          tag="consumer-test-${GITHUB_RUN_NUMBER}"
+          gh release view "$tag" >/dev/null 2>&1 || gh release create "$tag" --prerelease --title "Consumer test ${GITHUB_RUN_NUMBER}" --notes "Screenshots every 2 seconds from the consumer test" || true
+          7z a -tzip windows-shots.zip ./shots/* >/dev/null && gh release upload "$tag" windows-shots.zip --clobber
+
+  mac:
+    runs-on: macos-latest
+    timeout-minutes: 45
+    steps:
+      - name: Install like a customer
+        run: |
+          curl -fsSL "$STAGING/install.sh" | sh
+          sleep 6; pkill -f "Tech Support.app/Contents/MacOS" || true
+          APP=/Applications/"Tech Support.app"; [ -d "$APP" ] || APP="$HOME/Applications/Tech Support.app"
+          test -d "$APP"; ! xattr -p com.apple.quarantine "$APP" 2>/dev/null
+          codesign --verify --deep --strict "$APP" && echo "signature ok (ad-hoc)"
+          echo "APP=$APP" >> $GITHUB_ENV
+      - name: Turn on the 3 permissions (what the person does in System Settings)
+        run: |
+          BIN="$APP/Contents/MacOS/tech-support"
+          for db in "$HOME/Library/Application Support/com.apple.TCC/TCC.db" "/Library/Application Support/com.apple.TCC/TCC.db"; do
+            for svc in kTCCServiceScreenCapture kTCCServiceAccessibility kTCCServiceMicrophone kTCCServicePostEvent; do
+              sudo sqlite3 "$db" "INSERT OR REPLACE INTO access (service,client,client_type,auth_value,auth_reason,auth_version,flags) VALUES ('$svc','ai.westwardconsulting.techsupport',0,2,4,1,0);" 2>&1 || true
+              sudo sqlite3 "$db" "INSERT OR REPLACE INTO access (service,client,client_type,auth_value,auth_reason,auth_version,flags) VALUES ('$svc','$BIN',1,2,4,1,0);" 2>&1 || true
+            done
+          done
+          mkdir -p shots
+          cat > run.sh <<'EOS'
+          #!/bin/bash
+          phase=$1; autopilot=$2; n=$3; minutes=$4
+          if [ -n "$n" ]; then
+            TOKEN=$(curl -fsS -X POST -d "" "$STAGING/auth/test?n=$n" -H "x-test-login: $TEST_LOGIN" | python3 -c 'import sys,json;print(json.load(sys.stdin)["token"])')
+            launchctl setenv TECHSUPPORT_TEST_SESSION "$TOKEN"
+          else launchctl unsetenv TECHSUPPORT_TEST_SESSION; fi
+          launchctl setenv TECHSUPPORT_SERVER "$STAGING"
+          launchctl setenv TECHSUPPORT_SHOW_IN_CAPTURE 1
+          launchctl setenv TECHSUPPORT_AUTOPILOT "$autopilot"
+          LOG="$PWD/shots/mac-$phase.log"; launchctl setenv TECHSUPPORT_AUTOPILOT_LOG "$LOG"
+          ( i=0; while true; do screencapture -x "shots/mac-$phase-$(printf %03d $i).png"; i=$((i+1)); sleep 2; done ) & SHOOT=$!
+          open "$APP"
+          end=$(( $(date +%s) + ${minutes%.*}*60 + 25 ))
+          while [ $(date +%s) -lt $end ]; do sleep 3; grep -qE 'DONE|PROBLEM|STOPPED' "$LOG" 2>/dev/null && { sleep 8; break; }; done
+          pkill -f "Tech Support.app/Contents/MacOS" || true; kill $SHOOT || true
+          cat "$LOG" 2>/dev/null || true
+          EOS
+          chmod +x run.sh
+      - name: First launch (light)
+        run: ./run.sh 1-first none "" 0
+      - name: I don't know how to do something (light)
+        env:
+          TEST_LOGIN: ${{ secrets.TS_STAGING_TEST_LOGIN }}
+        run: ./run.sh 2-how "how:${{ inputs.how }}" "${{ github.run_number }}3" 8
+      - name: Something is broken (dark)
+        env:
+          TEST_LOGIN: ${{ secrets.TS_STAGING_TEST_LOGIN }}
+        run: |
+          defaults write -g AppleInterfaceStyle Dark
+          osascript -e 'tell application "System Events" to tell appearance preferences to set dark mode to true' 2>/dev/null || true
+          printf '{\\rtf1\\ansi{\\fonttbl\\f0 Helvetica;}\\f0\\fs6 Milk\\par Eggs\\par Bread\\par Call the pharmacy about the refill}' > "$HOME/Desktop/Grocery list.rtf"
+          open -a TextEdit "$HOME/Desktop/Grocery list.rtf"; sleep 4
+          ./run.sh 3-broken "bug:The words in this window are way too small. I can't read my list." "${{ github.run_number }}4" 8
+      - name: Delete the test accounts
+        if: always()
+        env:
+          TEST_LOGIN: ${{ secrets.TS_STAGING_TEST_LOGIN }}
+        run: |
+          for n in "${{ github.run_number }}3" "${{ github.run_number }}4"; do
+            R=$(curl -fsS -X POST -d "" "$STAGING/auth/test?n=$n" -H "x-test-login: $TEST_LOGIN") || continue
+            E=$(echo "$R" | python3 -c 'import sys,json,urllib.parse;print(urllib.parse.quote(json.load(sys.stdin)["email"]))')
+            T=$(echo "$R" | python3 -c 'import sys,json;print(json.load(sys.stdin)["token"])')
+            curl -fsS -X DELETE "$STAGING/api/ops/users/$E" -H "authorization: Bearer $T" || true
+          done
+      - name: Attach screenshots
+        if: always()
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          tag="consumer-test-${GITHUB_RUN_NUMBER}"
+          gh release view "$tag" >/dev/null 2>&1 || gh release create "$tag" --prerelease --title "Consumer test ${GITHUB_RUN_NUMBER}" --notes "Screenshots every 2 seconds from the consumer test" || true
+          mkdir -p shots && cd shots && zip -qr ../mac-shots.zip . && cd .. && gh release upload "$tag" mac-shots.zip --clobber

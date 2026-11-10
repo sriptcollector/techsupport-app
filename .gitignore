@@ -1,0 +1,7 @@
+node_modules/
+target/
+dist/
+shots/
+.env*
+*.log
+app/src-tauri/gen/
