@@ -1,5 +1,8 @@
 // Talking to the server and to the native side. One place for the session token.
 import { invoke } from "@tauri-apps/api/core";
+import { emit, listen } from "@tauri-apps/api/event";
+
+listen<boolean>("veil", (e) => (document.documentElement.style.visibility = e.payload ? "hidden" : ""));
 
 declare const __SERVER__: string;
 export type Env = { os: "mac" | "windows"; version: string; server: string | null; test_session: string | null; show_in_capture: boolean; autopilot: string | null };
@@ -90,7 +93,21 @@ export async function track(event: string, props: Record<string, unknown> = {}) 
 
 // ---------- native ----------
 export type Shot = { data: string; w: number; h: number; sw: number; sh: number; scale: number };
-export const capture = (region?: [number, number, number, number], max = 1280) => invoke<Shot>("capture", { region: region ?? null, max });
+// Our own windows are hidden from the AI's screenshots by the OS (content protection). In the
+// consumer test that protection is off so the VM screenshots show the helper, so we hide our
+// windows for the moment of the AI's screenshot instead: the AI sees what a real user's AI would.
+export async function capture(region?: [number, number, number, number], max = 1280) {
+  const veil = (await getEnv()).show_in_capture;
+  if (veil) {
+    await emit("veil", true);
+    await new Promise((r) => setTimeout(r, 180));
+  }
+  try {
+    return await invoke<Shot>("capture", { region: region ?? null, max });
+  } finally {
+    if (veil) emit("veil", false);
+  }
+}
 export const act = (action: Record<string, unknown>) => invoke<void>("act", { action });
 export const cursor = () => invoke<[number, number] | null>("cursor");
 export type Win = { title: string; app: string; x: number; y: number; w: number; h: number };
