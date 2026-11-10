@@ -493,7 +493,7 @@ export function Panel() {
       <div className="body" style={{ paddingTop: 0 }}>
         <div className="chat" aria-live="polite">
           {lines.map((l, i) => (
-            <div key={i} className={`msg ${l.who}`}>
+            <div key={i} className={`msg ${l.who === "bot" ? "helper" : "me"}`}>
               {l.pin ? <span className="pin">{l.pin}</span> : null}
               {l.text}
             </div>
@@ -508,7 +508,7 @@ export function Panel() {
               ))}
             </div>
           )}
-          {thinking && !card && <div className="msg bot small">Looking at your screen…</div>}
+          {thinking && !card && <div className="msg helper small">Looking at your screen…</div>}
           {plan && (
             <div className="plan">
               <ol>{plan.steps.map((s, i) => <li key={i}>{s}</li>)}</ol>

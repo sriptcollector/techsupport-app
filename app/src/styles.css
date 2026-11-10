@@ -92,7 +92,7 @@ p { margin: 0 0 16px; max-width: 42ch; }
 .chat { flex: 1; overflow-y: auto; display: flex; flex-direction: column; gap: 10px; padding: 4px 2px 12px; }
 .chat > * { flex-shrink: 0; }
 .msg { max-width: 88%; padding: 10px 14px; border-radius: var(--r-bubble); line-height: 23px; user-select: text; }
-.msg.bot { background: var(--surface); border: 1px solid var(--hair); align-self: flex-start; }
+.msg.helper { background: var(--surface); border: 1px solid var(--hair); align-self: flex-start; }
 .msg.me { background: var(--user); color: var(--user-ink); align-self: flex-end; }
 .msg.me.partial { background: var(--user-soft); color: var(--ink); }
 .msg .pin { display: inline-grid; place-items: center; width: 22px; height: 22px; border-radius: 50%; background: var(--user-ink); color: var(--user); font-size: 13px; font-weight: 600; margin-right: 6px; }

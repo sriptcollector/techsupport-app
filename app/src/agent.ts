@@ -20,7 +20,7 @@ export type UI = {
   problem: (kind: "offline" | "busy" | "cap" | "month_used" | "trial_used" | "no_plan" | "stopped") => void;
 };
 
-const RISKY = /\b(delet|trash|empty the|erase|reset|pay\b|paying|payment|purchas|buy|checkout|send|post\b|posting|reply|share|password|passcode|install|uninstall|update now|software update|sign(ing)? out|log(ging)? out|accept|agree to|subscribe)/i;
+const RISKY = /\b(delet|trash|empty the|erase all|erase (your|the)|factory reset|reset (your|the) (mac|pc|computer|phone|password)|pay\b|paying|payment|purchas|buy|checkout|send|post\b|posting|reply|share|password|passcode|install|uninstall|update now|software update|sign(ing)? out|log(ging)? out|accept|agree to|subscribe)/i;
 const ov = (name: string, payload: unknown = {}) => emitTo("overlay", name, payload);
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 const hash = (s: string) => {

@@ -109,9 +109,36 @@ fn with_mods<F: FnOnce(&mut Enigo) -> Result<(), String>>(e: &mut Enigo, mods: &
     r
 }
 
+/// macOS only lets keyboard events be built on the main thread (doing it elsewhere crashes the app),
+/// so on a Mac each step runs there; long typing goes one letter at a time so the screen keeps moving.
+fn on_main<T: Send + 'static>(app: &tauri::AppHandle, f: impl FnOnce() -> T + Send + 'static) -> Result<T, String> {
+    if cfg!(target_os = "macos") {
+        let (tx, rx) = std::sync::mpsc::channel();
+        app.run_on_main_thread(move || {
+            let _ = tx.send(f());
+        })
+        .map_err(|e| e.to_string())?;
+        rx.recv().map_err(|e| e.to_string())
+    } else {
+        Ok(f())
+    }
+}
+
 #[tauri::command]
-pub async fn act(action: Action) -> Result<(), String> {
-    tauri::async_runtime::spawn_blocking(move || run(action)).await.map_err(|e| e.to_string())?
+pub async fn act(app: tauri::AppHandle, action: Action) -> Result<(), String> {
+    tauri::async_runtime::spawn_blocking(move || match action {
+        Action::Type { text } if text.chars().count() <= 120 => {
+            guard_text(&text)?;
+            for c in text.chars() {
+                on_main(&app, move || run(Action::Type { text: c.to_string() }))??;
+                std::thread::sleep(std::time::Duration::from_millis(50));
+            }
+            Ok(())
+        }
+        other => on_main(&app, move || run(other))?,
+    })
+    .await
+    .map_err(|e| e.to_string())?
 }
 
 fn run(action: Action) -> Result<(), String> {
@@ -173,15 +200,8 @@ fn run(action: Action) -> Result<(), String> {
         }
         Action::Type { text } => {
             guard_text(&text)?;
-            // Visible typing: about 20 characters a second so the person can follow.
-            if text.chars().count() > 120 {
-                return e.text(&text).map_err(err);
-            }
-            for c in text.chars() {
-                e.text(&c.to_string()).map_err(err)?;
-                std::thread::sleep(std::time::Duration::from_millis(50));
-            }
-            Ok(())
+            // Short text arrives one letter at a time from `act` (about 20 a second, so the person can follow).
+            e.text(&text).map_err(err)
         }
         Action::Key { combo, repeat } => {
             let parts: Vec<&str> = combo.split('+').collect();
@@ -199,9 +219,8 @@ fn run(action: Action) -> Result<(), String> {
 
 /// Where the real pointer is, in logical points (used to notice the person moving the mouse).
 #[tauri::command]
-pub fn cursor() -> Option<(f64, f64)> {
-    let e = Enigo::new(&Settings::default()).ok()?;
-    let (x, y) = e.location().ok()?;
+pub async fn cursor(app: tauri::AppHandle) -> Option<(f64, f64)> {
+    let (x, y) = on_main(&app, || Enigo::new(&Settings::default()).ok().and_then(|e| e.location().ok())).ok()??;
     let s = if cfg!(windows) { crate::screen::monitor_scale() } else { 1.0 };
     Some((x as f64 / s, y as f64 / s))
 }
