@@ -25,6 +25,15 @@ type Card =
 const win = getCurrentWindow();
 const SIZES: Partial<Record<View, [number, number]>> = { home: [380, 352], chat: [380, 540], bug: [380, 460], pill: [380, 64], settings: [380, 520] };
 const SHOW_ME = `Switch to "Show me, I'll click": point with mouse_move and use needs_you; don't click.`;
+function textScale() {
+  const el = document.createElement("span");
+  el.textContent = "M";
+  el.style.cssText = "position:absolute;visibility:hidden;font:100px/1 var(--font);";
+  document.body.appendChild(el);
+  const k = el.getBoundingClientRect().height / 100;
+  el.remove();
+  return Math.min(2, Math.max(1, k));
+}
 const SUGGEST = ["Make my text bigger", "Check my Wi-Fi", "Show me how to take a screenshot"];
 
 export function Panel() {
@@ -64,12 +73,12 @@ export function Panel() {
     }
     await win.show();
     if (v !== "pill") await win.setFocus();
-    // Big system text (or the person's own setting) can make the content larger than the window: grow to fit.
-    requestAnimationFrame(async () => {
-      const d = document.documentElement;
-      const sx = d.scrollWidth / innerWidth, sy = d.scrollHeight / innerHeight;
-      if (size && (sx > 1.01 || sy > 1.01)) await placePanel(Math.ceil(size[0] * Math.max(1, sx)), Math.ceil(size[1] * Math.max(1, sy)));
-    });
+    // Big system text (Windows "Text size", Mac larger text) makes everything bigger than our
+    // fixed window: measure how much bigger a 100 px letter really is and grow the window to match.
+    if (size) {
+      const k = textScale();
+      if (k > 1.02) await placePanel(Math.ceil(size[0] * k), Math.ceil(size[1] * k));
+    }
   }
   // Keep the pill off the spot the helper is about to press.
   const pillLow = useRef(false);
