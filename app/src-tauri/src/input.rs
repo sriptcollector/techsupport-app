@@ -165,7 +165,10 @@ fn run(action: Action) -> Result<(), String> {
                     if i > 0 {
                         std::thread::sleep(std::time::Duration::from_millis(60));
                     }
-                    e.button(b, Direction::Click).map_err(|x| x.to_string())?;
+                    // A real press takes a moment; some controls (Mac switches) ignore instant clicks.
+                    e.button(b, Direction::Press).map_err(|x| x.to_string())?;
+                    std::thread::sleep(std::time::Duration::from_millis(45));
+                    e.button(b, Direction::Release).map_err(|x| x.to_string())?;
                 }
                 Ok(())
             })

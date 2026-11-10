@@ -398,7 +398,8 @@ export function Panel() {
         setTimeout(f, ms);
       };
       apLog(`view ${view} ${card?.kind ?? ""}`);
-      const [kind, ...rest] = ap.split(":");
+      const [head, ...rest] = ap.split(":");
+      const kind = head.split("@")[0];
       const words = rest.join(":");
       if (view === "welcome") once("welcome", 3500, () => (localStorage.setItem("ts_seen", "1"), setView("signin")));
       if (view === "home") once("start", 4000, () => (kind === "bug" ? startBug() : startHow(words)));

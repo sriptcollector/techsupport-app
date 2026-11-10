@@ -186,9 +186,11 @@ export function Overlay() {
   useEffect(() => redraw(strokes), [strokes]);
 
   useEffect(() => {
-    const f = () => {
+    const f = async () => {
+      // The scripted person clicks the window named in the test ("bug@Grocery:..."), else the middle one.
+      const hint = ((await autopilot()) ?? "").match(/^bug@([^:]+):/)?.[1]?.toLowerCase();
       const c: [number, number] = [innerWidth / 2, innerHeight / 2];
-      const w = winAt(...c) ?? whole();
+      const w = (hint && wins.find((x) => `${x.app} ${x.title}`.toLowerCase().includes(hint))) || winAt(...c) || whole();
       setRegion(w);
       setMode("mark");
       emitTo("panel", "ov:picked", { app: w.app || w.title });

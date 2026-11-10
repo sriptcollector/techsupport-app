@@ -90,7 +90,7 @@ jobs:
           Start-Process notepad "$env:TEMP\Grocery list.txt"; Start-Sleep 3
           Add-Type -AssemblyName System.Windows.Forms
           1..6 | ForEach-Object { [System.Windows.Forms.SendKeys]::SendWait('^{SUBTRACT}'); Start-Sleep -Milliseconds 200 }
-          .\run.ps1 -phase 3-broken -autopilot "bug:The words in this window are way too small. I can't read my list." -n "${{ github.run_number }}2" -minutes 8
+          .\run.ps1 -phase 3-broken -autopilot "bug@Grocery:The words in this window are way too small. I can't read my list." -n "${{ github.run_number }}2" -minutes 8
       - name: Delete the test accounts
         if: always()
         shell: powershell
@@ -168,7 +168,7 @@ jobs:
           osascript -e 'tell application "System Events" to tell appearance preferences to set dark mode to true' 2>/dev/null || true
           printf '{\\rtf1\\ansi{\\fonttbl\\f0 Helvetica;}\\f0\\fs6 Milk\\par Eggs\\par Bread\\par Call the pharmacy about the refill}' > "$HOME/Desktop/Grocery list.rtf"
           open -a TextEdit "$HOME/Desktop/Grocery list.rtf"; sleep 4
-          ./run.sh 3-broken "bug:The words in this window are way too small. I can't read my list." "${{ github.run_number }}4" 8
+          ./run.sh 3-broken "bug@Grocery:The words in this window are way too small. I can't read my list." "${{ github.run_number }}4" 8
       - name: Delete the test accounts
         if: always()
         env:
