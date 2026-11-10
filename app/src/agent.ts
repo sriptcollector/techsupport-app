@@ -177,7 +177,7 @@ export class Session {
       }
       case "say": {
         if (RISKY.test(i.text) && !this.confirmed) this.needConfirm = true;
-        this.n = Math.min(this.total || 99, this.n + 1);
+        this.n = Math.max(this.n, Math.min(this.total || 99, Number(i.step) || this.n || 1));
         this.ui.progress(this.n, Math.max(this.total, this.n), this.task);
         ov("ov:expr", { expr: (i.expression as Expr) ?? "focused" });
         const words = i.text.split(" ").length;

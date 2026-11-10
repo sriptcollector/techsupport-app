@@ -224,11 +224,11 @@ export function Overlay() {
           <span className="tag">{box.app || box.title}</span>
         </div>
       )}
-      <canvas ref={canvas} style={{ position: "absolute", inset: 0, width: "100%", height: "100%", pointerEvents: "none" }} />
-      {pins.map((p) => (
+      <canvas ref={canvas} style={{ position: "absolute", inset: 0, width: "100%", height: "100%", pointerEvents: "none", display: mode === "mark" ? undefined : "none" }} />
+      {mode === "mark" && pins.map((p) => (
         <span key={p.n} className="pinmark" style={{ left: p.x, top: p.y }}>{p.n}</span>
       ))}
-      {tags.slice(-6).map((t, i) => (
+      {mode === "mark" && tags.slice(-6).map((t, i) => (
         <div key={i} className="bubble user" style={{ left: Math.min(t.x + 18, innerWidth - 300), top: t.y + 12 }}>{t.text}</div>
       ))}
       {mode === "pick" && (

@@ -24,6 +24,7 @@ type Card =
 
 const win = getCurrentWindow();
 const SIZES: Partial<Record<View, [number, number]>> = { home: [380, 352], chat: [380, 540], bug: [380, 460], pill: [380, 64], settings: [380, 520] };
+const SHOW_ME = `Switch to "Show me, I'll click": point with mouse_move and use needs_you; don't click.`;
 const SUGGEST = ["Make my text bigger", "Check my Wi-Fi", "Show me how to take a screenshot"];
 
 export function Panel() {
@@ -516,7 +517,8 @@ export function Panel() {
                 <button className="chip" onClick={() => pickRef.current("show")}>{plan.fix ? "Show me how" : "Show me, I'll click"}</button>
                 <button className="chip" onClick={() => pickRef.current("steps")}>{plan.fix ? "Tell me what's wrong" : "Just tell me the steps"}</button>
               </div>
-              {plan.steps.length <= 10 && <p className="small" style={{ margin: "10px 0 0" }}>Takes about {Math.max(10, Math.ceil((plan.steps.length * 3) / 5) * 5)} seconds.</p>}
+              <p className="small" style={{ margin: "10px 0 0" }}>Nothing happens until you choose. Press Stop or move your mouse and I stop at once. I never touch passwords or bank pages.</p>
+              {plan.steps.length <= 10 && <p className="small" style={{ margin: "6px 0 0" }}>{plan.steps.length * 13 < 50 ? `About ${Math.ceil((plan.steps.length * 13) / 10) * 10} seconds.` : plan.steps.length * 13 < 90 ? "About a minute." : `About ${Math.round((plan.steps.length * 13) / 60)} minutes.`}</p>}
             </div>
           )}
           {card?.kind === "ask" && (
@@ -534,11 +536,19 @@ export function Panel() {
                   <ol>{card.steps.map((s, i) => <li key={i}>{s}</li>)}</ol>
                 </>
               )}
+              {!card.worked ? (
+                <div className="chips" style={{ marginTop: 12 }}>
+                  <button className="chip rec" autoFocus onClick={() => (setCard(null), session.current?.more("Try again a different way. Take a screenshot first."))}>Try again<span className="tag">Recommended</span></button>
+                  <button className="chip" onClick={() => (setCard(null), session.current?.more(SHOW_ME))}>Show me, I'll click</button>
+                  <button className="chip" onClick={() => (setCard(null), overlayMode(false), show("home"))}>I'm done</button>
+                </div>
+              ) : (
               <div className="chips" style={{ marginTop: 12 }}>
                 <button className="chip rec" autoFocus onClick={() => (track("fix_confirmed", { yes: true }), say("bot", "Glad I could help."), speak("Glad I could help.", me?.settings), setCard(null), setTimeout(() => win.hide(), 2000))}>Yes, all good<span className="tag">Recommended</span></button>
                 <button className="chip" onClick={() => (setCard(null), track("fix_confirmed", { yes: false }), say("bot", "What's still wrong?"), ensureMic(heard))}>No, still wrong</button>
                 <button className="chip" onClick={() => (setCard(null), say("me", "Undo that"), session.current?.more("Please undo everything you changed in this session, in reverse order, saying each step. Then call done."))}>Undo that</button>
               </div>
+              )}
             </div>
           )}
           {card?.kind === "stopped" && (
@@ -731,7 +741,7 @@ function Trial({ progress, me, onDone }: { progress: React.ReactNode; me: Me | n
         </ul>
         <div className="grow" />
         {state === "waiting" ? (
-          <p>Finish in your browser. I'll move on by myself.</p>
+          <p>A page opened in your web browser to add your card. Come back here when it's done; I'll move on by myself.</p>
         ) : state === "soon" ? (
           <p>The free week opens very soon. We'll email you the moment it does.</p>
         ) : (
@@ -739,7 +749,7 @@ function Trial({ progress, me, onDone }: { progress: React.ReactNode; me: Me | n
         )}
         {state === "error" && <p className="err">Checkout didn't open. Try again in a minute.</p>}
         <p className="small" style={{ margin: "10px 0 0" }}>
-          {used ? `You'll pay ${plan === "yearly" ? "$192 today, then every year" : "$20 today, then every month"}.` : `You won't be charged today. We'll remind you 2 days before your trial ends. Then ${plan === "yearly" ? "$192 a year" : "$20 a month"}. Charges appear as Toolbay AI.`}
+          {used ? `You'll pay ${plan === "yearly" ? "$192 today, then every year" : "$20 today, then every month"}.` : `You won't be charged today. We'll remind you 2 days before your trial ends. Then ${plan === "yearly" ? "$192 a year" : "$20 a month"}. Charges appear as Toolbay AI, the company behind Tech Support.`}
         </p>
       </div>
     </div>
