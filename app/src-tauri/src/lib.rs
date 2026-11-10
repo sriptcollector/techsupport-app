@@ -155,7 +155,7 @@ fn place_panel(app: AppHandle, width: f64, height: f64) {
         PhysicalPosition::new((x - pw / 2 + (12.0 * scale) as i32).clamp(margin, msize.width as i32 - pw - margin), (30.0 * scale) as i32)
     } else {
         let x = rect.as_ref().map(|r| r.position.to_physical::<i32>(scale).x).unwrap_or(msize.width as i32 - pw - margin);
-        PhysicalPosition::new((x - pw / 2).clamp(margin, msize.width as i32 - pw - margin), msize.height as i32 - ph - (56.0 * scale) as i32)
+        PhysicalPosition::new((x - pw / 2).clamp(margin, msize.width as i32 - pw - margin), (msize.height as i32 - ph - (56.0 * scale) as i32).max(margin))
     };
     let _ = w.set_position(pos);
 }

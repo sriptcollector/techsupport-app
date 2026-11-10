@@ -64,22 +64,21 @@ export function Panel() {
   // ---------- window size and placement ----------
   async function show(v: View) {
     setView(v);
-    const size = SIZES[v];
-    if (size) {
-      await placePanel(size[0], size[1]);
-    } else {
-      await win.setSize(new LogicalSize(560, 640));
-      await win.center();
+    const base = SIZES[v] ?? [560, 640];
+    await (SIZES[v] ? placePanel(base[0], base[1]) : win.setSize(new LogicalSize(base[0], base[1])));
+    // Big system text (Windows "Text size", Mac larger text) makes everything bigger than our fixed
+    // window: either the fonts grow or the whole page zooms. Measure it and grow the window to match,
+    // never past the screen.
+    const k = Math.max(textScale(), base[0] / innerWidth);
+    if (k > 1.02) {
+      const z = Math.max(1, base[0] / innerWidth); // screen sizes below are in zoomed CSS pixels
+      const maxW = screen.availWidth * z * 0.95, maxH = screen.availHeight * z * 0.92;
+      const w = Math.min(Math.ceil(base[0] * k), maxW), h = Math.min(Math.ceil(base[1] * k), maxH);
+      await (SIZES[v] ? placePanel(w, h) : win.setSize(new LogicalSize(w, h)));
     }
+    if (!SIZES[v]) await win.center();
     await win.show();
     if (v !== "pill") await win.setFocus();
-    // Big system text (Windows "Text size", Mac larger text) makes everything bigger than our
-    // fixed window: measure how much bigger a 100 px letter really is and grow the window to match.
-    if (size) {
-      // Either the fonts got bigger, or the whole page is zoomed (then fewer CSS pixels fit the window).
-      const k = Math.max(textScale(), size[0] / innerWidth);
-      if (k > 1.02) await placePanel(Math.ceil(size[0] * k), Math.ceil(size[1] * k));
-    }
   }
   // Keep the pill off the spot the helper is about to press.
   const pillLow = useRef(false);
