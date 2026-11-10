@@ -83,6 +83,7 @@ export class Session {
   async start(firstText: string, extra: any[] = []) {
     const env = await getEnv();
     this.shot = await capture();
+    ov("ov:screen", { sw: this.shot.sw, sh: this.shot.sh });
     this.messages.push({ role: "user", content: [{ type: "text", text: firstText }, ...extra, { type: "image", source: { type: "base64", media_type: "image/jpeg", data: this.shot.data } }] });
     this.task = firstText.slice(0, 60);
     track("help_started", { mode: this.mode, os: env.os });

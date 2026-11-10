@@ -4,7 +4,7 @@
 import { emitTo, listen } from "@tauri-apps/api/event";
 import { useEffect, useRef, useState } from "react";
 import { Bot, type Expr } from "./bot";
-import { autopilot, windowsList, type Win } from "./api";
+import { autopilot, capture, windowsList, type Win } from "./api";
 import { saidThatsAll } from "./voice";
 
 type Mode = "off" | "walk" | "pick" | "mark";
@@ -30,6 +30,9 @@ export function Overlay() {
   const [tags, setTags] = useState<Tag[]>([]);
   const [textSize, setTextSize] = useState(17);
   const botRef = useRef<HTMLDivElement>(null);
+  // Screen points -> this window's CSS pixels (differs when the computer zooms text, e.g. Windows Text size).
+  const fRef = useRef(1);
+  const F = (x: number) => x * fRef.current;
   const posRef = useRef(pos);
   const marks = useRef<{ pins: Pin[]; strokes: Stroke[] }>({ pins: [], strokes: [] });
   marks.current = { pins, strokes };
@@ -53,23 +56,25 @@ export function Overlay() {
           setTags([]);
           setTool("point");
           setWins(await windowsList().catch(() => []));
+          capture(undefined, 64).then((c) => (fRef.current = innerWidth / c.sw || 1)).catch(() => {});
           setPosNow([innerWidth / 2 - BOT / 2, innerHeight / 2 - 90]);
           setExpr("listening");
           // CI only: the scripted person clicks the window in the middle of the screen, then points at it.
           if (await autopilot()) setTimeout(() => document.dispatchEvent(new CustomEvent("ap-pick")), 3000);
         }
       }),
-      listen<{ x: number; y: number; ms: number }>("ov:fly", (e) => fly(e.payload.x, e.payload.y, e.payload.ms)),
+      listen<{ sw: number; sh: number }>("ov:screen", (e) => (fRef.current = innerWidth / e.payload.sw || 1)),
+      listen<{ x: number; y: number; ms: number }>("ov:fly", (e) => fly(F(e.payload.x), F(e.payload.y), e.payload.ms)),
       listen<{ expr: Expr }>("ov:expr", (e) => setExpr(e.payload.expr)),
       listen<{ text: string | null; spoken?: number }>("ov:say", (e) => setSay(e.payload.text ? { text: e.payload.text, spoken: e.payload.spoken ?? 999 } : null)),
       listen<{ x: number; y: number }>("ov:press", (e) => {
         const id = Math.random();
-        setRipples((r) => [...r, { id, ...e.payload }]);
+        setRipples((r) => [...r, { id, x: F(e.payload.x), y: F(e.payload.y) }]);
         setTimeout(() => setRipples((r) => r.filter((x) => x.id !== id)), 320);
       }),
-      listen<{ x: number; y: number } | null>("ov:point", (e) => setPoint(e.payload ? [e.payload.x, e.payload.y] : null)),
+      listen<{ x: number; y: number } | null>("ov:point", (e) => setPoint(e.payload ? [F(e.payload.x), F(e.payload.y)] : null)),
       listen<{ x: number; y: number; title: string; detail: string; undoable: boolean } | null>("ov:confirm", async (e) => {
-        setCard(e.payload);
+        setCard(e.payload && { ...e.payload, x: F(e.payload.x), y: F(e.payload.y) });
         if (e.payload && (await autopilot())) setTimeout(() => answer(true), 3000);
       }),
       listen<{ text: string; at: number }>("ov:words", (e) => attachWords(e.payload.text, e.payload.at)),
@@ -120,7 +125,7 @@ export function Overlay() {
   function winAt(x: number, y: number) {
     return wins.find((w) => x >= w.x && x <= w.x + w.w && y >= w.y && y <= w.y + w.h) ?? null;
   }
-  const whole = (): Win => ({ title: "", app: "The whole screen", x: 0, y: 0, w: innerWidth, h: innerHeight });
+  const whole = (): Win => ({ title: "", app: "The whole screen", x: 0, y: 0, w: innerWidth / fRef.current, h: innerHeight / fRef.current });
 
   function attachWords(text: string, at: number) {
     const { pins, strokes } = marks.current;
@@ -132,10 +137,11 @@ export function Overlay() {
     emitTo("panel", "ov:tagged", { text, pin: near?.pin ?? null });
   }
 
+  const L = (x: number) => x / fRef.current; // this window's CSS pixels -> screen points
   function onDown(e: React.PointerEvent) {
     if (mode === "pick") return;
     if (mode !== "mark" || (e.target as HTMLElement).closest(".toolbar")) return;
-    const p: [number, number] = [e.clientX, e.clientY];
+    const p: [number, number] = [L(e.clientX), L(e.clientY)];
     if (!region) setRegion(winAt(...p) ?? whole());
     if (tool === "point") {
       setPins((ps) => [...ps, { n: ps.length + 1, x: p[0], y: p[1], at: Date.now() }]);
@@ -145,9 +151,9 @@ export function Overlay() {
     }
   }
   function onMove(e: React.PointerEvent) {
-    if (mode === "pick") return setHover(winAt(e.clientX, e.clientY));
+    if (mode === "pick") return setHover(winAt(L(e.clientX), L(e.clientY)));
     if (drawing.current) {
-      drawing.current.pts.push([e.clientX, e.clientY]);
+      drawing.current.pts.push([L(e.clientX), L(e.clientY)]);
       redraw([...strokes, drawing.current]);
     }
   }
@@ -160,7 +166,7 @@ export function Overlay() {
   }
   function onClickPick(e: React.MouseEvent) {
     if (mode !== "pick") return;
-    const w = winAt(e.clientX, e.clientY) ?? whole();
+    const w = winAt(L(e.clientX), L(e.clientY)) ?? whole();
     setRegion(w);
     setMode("mark");
     setExpr("listening");
@@ -179,7 +185,7 @@ export function Overlay() {
     g.lineCap = g.lineJoin = "round";
     for (const s of all) {
       g.beginPath();
-      s.pts.forEach(([x, y], i) => (i ? g.lineTo(x, y) : g.moveTo(x, y)));
+      s.pts.forEach(([x, y], i) => (i ? g.lineTo(F(x), F(y)) : g.moveTo(F(x), F(y))));
       g.stroke();
     }
   }
@@ -189,7 +195,7 @@ export function Overlay() {
     const f = async () => {
       // The scripted person clicks the window named in the test ("bug@Grocery:..."), else the middle one.
       const hint = ((await autopilot()) ?? "").match(/^bug@([^:]+):/)?.[1]?.toLowerCase();
-      const c: [number, number] = [innerWidth / 2, innerHeight / 2];
+      const c: [number, number] = [L(innerWidth / 2), L(innerHeight / 2)];
       const w = (hint && wins.find((x) => `${x.app} ${x.title}`.toLowerCase().includes(hint))) || winAt(...c) || whole();
       setRegion(w);
       setMode("mark");
@@ -222,16 +228,16 @@ export function Overlay() {
     <div className={`overlay${mode === "pick" || mode === "mark" || card ? " interactive" : ""}`} style={{ ["--bubble" as any]: `${textSize}px`, cursor: mode === "mark" && tool === "paint" ? "crosshair" : undefined }} onPointerDown={onDown} onPointerMove={onMove} onPointerUp={onUp} onClick={onClickPick}>
       {(mode === "pick" || mode === "mark") && !box && <div className="dim" />}
       {box && (
-        <div className="winbox" style={{ left: box.x, top: box.y, width: box.w, height: box.h }}>
+        <div className="winbox" style={{ left: F(box.x), top: F(box.y), width: F(box.w), height: F(box.h) }}>
           <span className="tag">{box.app || box.title}</span>
         </div>
       )}
       <canvas ref={canvas} style={{ position: "absolute", inset: 0, width: "100%", height: "100%", pointerEvents: "none", display: mode === "mark" ? undefined : "none" }} />
       {mode === "mark" && pins.map((p) => (
-        <span key={p.n} className="pinmark" style={{ left: p.x, top: p.y }}>{p.n}</span>
+        <span key={p.n} className="pinmark" style={{ left: F(p.x), top: F(p.y) }}>{p.n}</span>
       ))}
       {mode === "mark" && tags.slice(-6).map((t, i) => (
-        <div key={i} className="bubble user" style={{ left: Math.min(t.x + 18, innerWidth - 300), top: t.y + 12 }}>{t.text}</div>
+        <div key={i} className="bubble user" style={{ left: Math.min(F(t.x) + 18, innerWidth - 300), top: F(t.y) + 12 }}>{t.text}</div>
       ))}
       {mode === "pick" && (
         <div className="callout" style={{ top: innerHeight / 2 - 40 }} role="status">

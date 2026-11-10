@@ -76,7 +76,8 @@ export function Panel() {
     // Big system text (Windows "Text size", Mac larger text) makes everything bigger than our
     // fixed window: measure how much bigger a 100 px letter really is and grow the window to match.
     if (size) {
-      const k = textScale();
+      // Either the fonts got bigger, or the whole page is zoomed (then fewer CSS pixels fit the window).
+      const k = Math.max(textScale(), size[0] / innerWidth);
       if (k > 1.02) await placePanel(Math.ceil(size[0] * k), Math.ceil(size[1] * k));
     }
   }
