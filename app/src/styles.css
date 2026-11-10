@@ -51,7 +51,7 @@ button { font: inherit; color: inherit; cursor: pointer; }
 @keyframes open { from { opacity: 0; transform: scale(0.98); } to { opacity: 1; transform: none; } }
 .drag { height: 28px; flex: none; -webkit-app-region: drag; }
 .body { flex: 1; display: flex; flex-direction: column; padding: 8px 24px 24px; min-height: 0; }
-.center { align-items: center; text-align: center; justify-content: center; }
+.center { align-items: center; text-align: center; justify-content: safe center; overflow-y: auto; }
 h1 { font-weight: 300; font-size: 28px; line-height: 34px; letter-spacing: -0.01em; margin: 16px 0 8px; text-wrap: balance; }
 h2 { font-weight: 400; font-size: 20px; line-height: 26px; margin: 0; text-wrap: balance; }
 p { margin: 0 0 16px; max-width: 42ch; }

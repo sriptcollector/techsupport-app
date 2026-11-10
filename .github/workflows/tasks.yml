@@ -61,12 +61,24 @@ jobs:
         if: runner.os == 'Windows'
         shell: powershell
         run: |
+          Get-Process msedge -ErrorAction SilentlyContinue | Stop-Process -Force
+          $chrome = "C:\Program Files\Google\Chrome\Application\chrome.exe"
+          $flags = @('--no-first-run', '--no-default-browser-check')
           switch -Wildcard ("${{ matrix.task }}") {
             "broken*" { Set-Content "$env:TEMP\Grocery list.txt" "Milk`r`nEggs`r`nBread`r`nCall the pharmacy about the refill"; Start-Process notepad "$env:TEMP\Grocery list.txt"; Start-Sleep 3; Add-Type -AssemblyName System.Windows.Forms; 1..6 | % { [System.Windows.Forms.SendKeys]::SendWait('^{SUBTRACT}'); Start-Sleep -Milliseconds 200 } }
-            "safe" { Start-Process msedge "https://example.com"; Start-Sleep 6 }
-            "scam" { Start-Process msedge ("file:///" + (Resolve-Path scam.html).Path.Replace('\','/')); Start-Sleep 6 }
-            "website" { Start-Process msedge "https://en.wikipedia.org/wiki/Main_Page"; Start-Sleep 6 }
-            "voice" { Add-Type -AssemblyName System.Speech; $s = New-Object System.Speech.Synthesis.SpeechSynthesizer; $s.SetOutputToWaveFile("$PWD\voice.wav"); $s.Speak("Make the text on my screen bigger."); $s.Dispose(); Add-Content -Path $env:GITHUB_ENV -Value "TECHSUPPORT_TEST_AUDIO=$PWD\voice.wav" -Encoding ascii }
+            "safe" { Start-Process $chrome -ArgumentList ($flags + 'https://example.com'); Start-Sleep 8 }
+            "scam" { $u = "file:///" + ((Resolve-Path scam.html).Path -replace '\\', '/'); Start-Process $chrome -ArgumentList ($flags + $u); Start-Sleep 8 }
+            "website" { Start-Process $chrome -ArgumentList ($flags + 'https://en.wikipedia.org/wiki/Main_Page'); Start-Sleep 8 }
+            "learn" { Start-Process $chrome -ArgumentList ($flags + 'about:blank'); Start-Sleep 6 }
+            "printer" {
+              Add-PrinterDriver -Name "Generic / Text Only" -ErrorAction SilentlyContinue
+              Add-PrinterPort -Name "IP_10.0.0.99" -PrinterHostAddress "10.0.0.99" -ErrorAction SilentlyContinue
+              Add-Printer -Name "HP DeskJet 2700" -DriverName "Generic / Text Only" -PortName "IP_10.0.0.99"
+              Start-Sleep 2
+              Get-CimInstance Win32_Printer -Filter "Name='HP DeskJet 2700'" | Invoke-CimMethod -MethodName Pause | Out-Null
+              Get-Printer | Format-Table Name, DriverName, PrinterStatus -AutoSize
+            }
+            "voice" { Add-Type -AssemblyName System.Speech; $sp = New-Object System.Speech.Synthesis.SpeechSynthesizer; $sp.SetOutputToWaveFile("$PWD\voice.wav"); $sp.Speak("Make the text on my screen bigger."); $sp.Dispose(); Add-Content -Path $env:GITHUB_ENV -Value "TECHSUPPORT_TEST_AUDIO=$PWD\voice.wav" -Encoding ascii }
           }
       - name: Ask for help (Windows)
         if: runner.os == 'Windows'
@@ -116,10 +128,10 @@ jobs:
         run: |
           case "${{ matrix.task }}" in
             broken*) printf '{\\rtf1\\ansi{\\fonttbl\\f0 Helvetica;}\\f0\\fs6 Milk\\par Eggs\\par Bread\\par Call the pharmacy about the refill}' > "$HOME/Desktop/Grocery list.rtf"; open -a TextEdit "$HOME/Desktop/Grocery list.rtf"; sleep 4;;
-            safe) open -a "Google Chrome" --args --no-first-run --no-default-browser-check "https://example.com"; sleep 8;;
-            scam) open -a "Google Chrome" --args --no-first-run --no-default-browser-check "file://$PWD/scam.html"; sleep 8;;
-            website) open -a "Google Chrome" --args --no-first-run --no-default-browser-check "https://en.wikipedia.org/wiki/Main_Page"; sleep 8;;
-            learn) open -a "Google Chrome" --args --no-first-run --no-default-browser-check "about:blank"; sleep 8;;
+            safe) (nohup "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome" --no-first-run --no-default-browser-check "https://example.com" >/dev/null 2>&1 &) ; sleep 10;;
+            scam) (nohup "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome" --no-first-run --no-default-browser-check "file://$PWD/scam.html" >/dev/null 2>&1 &) ; sleep 10;;
+            website) (nohup "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome" --no-first-run --no-default-browser-check "https://en.wikipedia.org/wiki/Main_Page" >/dev/null 2>&1 &) ; sleep 10;;
+            learn) (nohup "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome" --no-first-run --no-default-browser-check "about:blank" >/dev/null 2>&1 &) ; sleep 10;;
             printer) sudo lpadmin -p HP_DeskJet_2700 -D "HP DeskJet 2700" -E -v ipp://10.0.0.99/ipp/print -m drv:///sample.drv/generic.ppd && sudo cupsdisable HP_DeskJet_2700 && lpstat -p;;
             voice) say -o voice.aiff "Make the text on my screen bigger." && afconvert -f WAVE -d LEI16 voice.aiff voice.wav && launchctl setenv TECHSUPPORT_TEST_AUDIO "$PWD/voice.wav";;
           esac
@@ -151,5 +163,5 @@ jobs:
           tag="tasks-${GITHUB_RUN_NUMBER}"; name="${{ runner.os }}-${{ matrix.task }}"
           gh release view "$tag" -R "$GITHUB_REPOSITORY" >/dev/null 2>&1 || gh release create "$tag" -R "$GITHUB_REPOSITORY" --prerelease --title "Task test ${GITHUB_RUN_NUMBER}" --notes "One VM per task" || true
           cp shots/task.log "$name.log" 2>/dev/null || echo "no log" > "$name.log"
-          if [ "${{ runner.os }}" = "Windows" ]; then 7z a -tzip "$name.zip" ./shots/* >/dev/null; else (cd shots && zip -qr "../$name.zip" .); fi
+          touch shots/.keep; if [ "${{ runner.os }}" = "Windows" ]; then 7z a -tzip "$name.zip" ./shots/* >/dev/null; else (cd shots && zip -qr "../$name.zip" .); fi
           gh release upload "$tag" -R "$GITHUB_REPOSITORY" "$name.zip" "$name.log" --clobber
