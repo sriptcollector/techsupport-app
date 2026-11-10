@@ -3,7 +3,7 @@
 // the mouse, presses Esc, says "stop", or presses Stop.
 import { emitTo } from "@tauri-apps/api/event";
 import { register, unregister } from "@tauri-apps/plugin-global-shortcut";
-import { act, api, ApiError, capture, cursor, getEnv, hush, speak, track, type Me, type Shot } from "./api";
+import { act, apLog, api, ApiError, capture, cursor, getEnv, hush, speak, track, type Me, type Shot } from "./api";
 import type { Expr } from "./bot";
 
 export type Pick = "do" | "show" | "steps";
@@ -132,6 +132,7 @@ export class Session {
           results.push({ ...base, is_error: true, content: "Not executed: the person pressed Stop." });
           continue;
         }
+        apLog(`tool ${u.name} ${JSON.stringify(u.input ?? {}).slice(0, 160)}`);
         try {
           const out = isComputer ? await this.computer(u.name, u.input ?? {}) : await this.tool(u.name, u.input ?? {});
           if (out === "__done__") {
@@ -142,6 +143,7 @@ export class Session {
           const msg = String((e as Error)?.message ?? e);
           this.failures++;
           if (this.failures >= 2) this.escalate = true; // two misses: a stronger model takes the next steps
+          apLog(`tool error ${u.name}: ${msg.slice(0, 160)}`);
           results.push({ ...base, is_error: true, content: isComputer ? `Error: ${msg}` : msg });
           if (isComputer) {
             // Later actions in the same batch don't run once one fails.
