@@ -62,6 +62,8 @@ jobs:
         shell: powershell
         run: |
           Get-Process msedge -ErrorAction SilentlyContinue | Stop-Process -Force
+          New-Item -Force 'HKLM:\SOFTWARE\Policies\Microsoft\Edge' | Out-Null
+          Set-ItemProperty 'HKLM:\SOFTWARE\Policies\Microsoft\Edge' -Name HideFirstRunExperience -Value 1 -Type DWord
           $chrome = "C:\Program Files\Google\Chrome\Application\chrome.exe"
           $flags = @('--no-first-run', '--no-default-browser-check')
           switch -Wildcard ("${{ matrix.task }}") {
@@ -89,6 +91,9 @@ jobs:
           $n = "${{ github.run_number }}" + "${{ strategy.job-index }}" + "7"
           $r = Invoke-RestMethod -Method Post -Uri "$env:STAGING/auth/test?n=$n" -Headers @{ 'x-test-login' = $env:TEST_LOGIN }
           $env:TECHSUPPORT_TEST_SESSION = $r.token
+          $h = @{ authorization = "Bearer $($r.token)"; 'content-type' = 'application/json' }
+          $c = Invoke-RestMethod -Method Post -Uri "$env:STAGING/api/checkout" -Headers $h -Body '{"plan":"monthly"}'
+          try { Invoke-WebRequest -Method Post -Uri "$env:STAGING$($c.url)/complete" -MaximumRedirection 0 -UseBasicParsing -ErrorAction SilentlyContinue | Out-Null } catch {}
           $env:TECHSUPPORT_SERVER = $env:STAGING
           $env:TECHSUPPORT_SHOW_IN_CAPTURE = '1'
           $env:TECHSUPPORT_AUTOPILOT = $env:AP
@@ -144,6 +149,8 @@ jobs:
           R=$(curl -fsS -X POST -d "" "$STAGING/auth/test?n=$n" -H "x-test-login: $TEST_LOGIN")
           TOKEN=$(echo "$R" | python3 -c 'import sys,json;print(json.load(sys.stdin)["token"])')
           EMAIL=$(echo "$R" | python3 -c 'import sys,json,urllib.parse;print(urllib.parse.quote(json.load(sys.stdin)["email"]))')
+          URL=$(curl -fsS -X POST "$STAGING/api/checkout" -H "authorization: Bearer $TOKEN" -H "content-type: application/json" -d '{"plan":"monthly"}' | python3 -c 'import sys,json;print(json.load(sys.stdin)["url"])')
+          curl -s -o /dev/null -X POST -d "" "$STAGING$URL/complete"
           launchctl setenv TECHSUPPORT_TEST_SESSION "$TOKEN"; launchctl setenv TECHSUPPORT_SERVER "$STAGING"; launchctl setenv TECHSUPPORT_SHOW_IN_CAPTURE 1
           launchctl setenv TECHSUPPORT_AUTOPILOT "$AP"; LOG="$PWD/shots/task.log"; launchctl setenv TECHSUPPORT_AUTOPILOT_LOG "$LOG"
           ( i=0; while true; do screencapture -x "shots/shot-$(printf %03d $i).png"; i=$((i+1)); sleep 2; done ) & SHOOT=$!
