@@ -4,6 +4,7 @@
 // Safety rules that must not depend on the AI's judgment live here too (see `guard_text`).
 mod input;
 mod perms;
+mod extra;
 mod quick;
 mod screen;
 

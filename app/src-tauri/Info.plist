@@ -6,6 +6,8 @@
   <string>Tech Support listens while you tell it what you need. It only listens when you press a help button.</string>
   <key>NSScreenCaptureUsageDescription</key>
   <string>Tech Support looks at your screen during a help session so it can show you where to click.</string>
+  <key>NSAppleEventsUsageDescription</key>
+  <string>Tech Support asks System Events to switch between dark and light mode when you ask it to.</string>
   <key>LSUIElement</key>
   <true/>
 </dict>

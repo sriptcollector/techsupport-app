@@ -13,6 +13,42 @@ type Stroke = { pts: [number, number][]; at: number };
 type Tag = { x: number; y: number; text: string };
 
 const BOT = 36;
+// A drawn picture of the system box the person will meet next, shown on the Yes card so they know which button is safe.
+function guideKind(detail: string): "uac" | "automation" | null {
+  if (/windows will (also )?ask|do you want to allow this app/i.test(detail)) return "uac";
+  if (/mac will (also )?ask|control .?system events/i.test(detail)) return "automation";
+  return null;
+}
+function GuidePic({ kind }: { kind: "uac" | "automation" }) {
+  return kind === "uac" ? (
+    <svg viewBox="0 0 300 150" role="img" aria-label="The Windows box that asks: Do you want to allow this app to make changes to your device. The Yes button is circled." style={{ width: "100%", borderRadius: 8, margin: "4px 0 10px" }}>
+      <rect width="300" height="150" fill="#2b3340" />
+      <rect x="30" y="10" width="240" height="130" fill="#f0f0f0" stroke="#8a8a8a" />
+      <rect x="30" y="10" width="240" height="24" fill="#0b6a9e" />
+      <text x="40" y="26" fontSize="10" fill="#fff">User Account Control</text>
+      <text x="40" y="54" fontSize="10" fontWeight="600" fill="#111">Do you want to allow this app to</text>
+      <text x="40" y="67" fontSize="10" fontWeight="600" fill="#111">make changes to your device?</text>
+      <rect x="40" y="100" width="100" height="26" fill="#0b6a9e" />
+      <text x="90" y="117" fontSize="11" fill="#fff" textAnchor="middle">Yes</text>
+      <rect x="150" y="100" width="100" height="26" fill="#dcdcdc" stroke="#aaa" />
+      <text x="200" y="117" fontSize="11" fill="#111" textAnchor="middle">No</text>
+      <rect x="35" y="95" width="110" height="36" rx="4" fill="none" stroke="#f59e0b" strokeWidth="3" />
+    </svg>
+  ) : (
+    <svg viewBox="0 0 300 150" role="img" aria-label="The Mac box that says Tech Support wants access to control System Events. The OK button is circled." style={{ width: "100%", borderRadius: 8, margin: "4px 0 10px" }}>
+      <rect width="300" height="150" fill="#c9d3de" />
+      <rect x="40" y="8" width="220" height="134" rx="12" fill="#ececec" stroke="#bdbdbd" />
+      <text x="150" y="40" fontSize="10.5" fontWeight="700" fill="#111" textAnchor="middle">&#8220;Tech Support&#8221; wants access to</text>
+      <text x="150" y="54" fontSize="10.5" fontWeight="700" fill="#111" textAnchor="middle">control &#8220;System Events&#8221;.</text>
+      <rect x="56" y="100" width="90" height="26" rx="6" fill="#fff" stroke="#c8c8c8" />
+      <text x="101" y="117" fontSize="10.5" fill="#111" textAnchor="middle">Don&#8217;t Allow</text>
+      <rect x="154" y="100" width="90" height="26" rx="6" fill="#0a84ff" />
+      <text x="199" y="117" fontSize="11" fill="#fff" textAnchor="middle" fontWeight="600">OK</text>
+      <rect x="150" y="95" width="98" height="36" rx="9" fill="none" stroke="#f59e0b" strokeWidth="3" />
+    </svg>
+  );
+}
+
 export function Overlay() {
   const [mode, setMode] = useState<Mode>("off");
   const [expr, setExpr] = useState<Expr>("idle");
@@ -276,6 +312,7 @@ export function Overlay() {
         <div className="card" style={{ left: Math.min(card.x + 30, innerWidth - 360), top: Math.min(Math.max(card.y - 40, 16), innerHeight - 260) }} role="alertdialog" aria-label={card.title}>
           <h2>{card.title}</h2>
           {card.detail && <div className="detail">{card.detail}</div>}
+          {guideKind(card.detail) && <GuidePic kind={guideKind(card.detail)!} />}
           <p className="small" style={{ margin: "0 0 14px" }}>{card.undoable ? "You can get it back." : "This can't be undone."}</p>
           <button className="btn primary full" autoFocus onClick={() => answer(true)}>Yes, do it</button>
           <button className="link" style={{ width: "100%", marginTop: 6 }} onClick={() => answer(false)}>No, don't</button>

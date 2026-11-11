@@ -299,10 +299,15 @@ Only reverse real changes (settings, text, files). Then call done.`;
         return "They did it. Take a screenshot to see what changed.";
       }
       case "quick": {
+        // These change or clear things: the person must have pressed Yes on a confirm card first.
+        if (/^(clear_cache|free_space|printer_restart_spooler|printer_fix|default_printer)$/.test(i.action) && !this.confirmed) {
+          throw new Error("That changes things. Call confirm first (say what will be cleared or changed; for printer_restart_spooler add the line 'Windows will ask: press Yes.') and wait for Yes.");
+        }
         this.noteAction("quick");
         this.note({ did: `quick ${i.action} ${i.arg ?? ""}` });
         ov("ov:expr", { expr: "focused" });
         const out = await invoke<string>("quick", { action: i.action, arg: i.arg || null });
+        this.confirmed = false;
         return `Done: ${String(out).slice(0, 1200)}`;
       }
       case "done": {
