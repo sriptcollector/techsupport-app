@@ -54,7 +54,7 @@ jobs:
           fail=0
           USR="$HOME/Library/Application Support/com.apple.TCC/TCC.db"
           # Newer macOS keeps the Screen Recording list outside TCC.db, so also read the Settings window itself.
-          inpane() { osascript -e 'tell application "System Events" to tell process "System Settings" to get value of every static text of entire contents of window 1' 2>/dev/null | grep -c "Tech Support" || true; }
+          inpane() { osascript -e 'tell application "System Events" to tell process "System Settings" to get entire contents of front window' 2>&1 | tr ',' '\n' | grep -c "Tech Support" || true; }
           listed() { a=$(sudo sqlite3 "$SYS" "select count(*) from access where service='$1' and (client like '%techsupport%' or client like '%tech-support%');"); b=$(sqlite3 "$USR" "select count(*) from access where service='$1' and (client like '%techsupport%' or client like '%tech-support%');" 2>/dev/null || echo 0); echo $((a+b)); }
           # Switch 1: Accessibility. Tech Support must already be in the list (no "+").
           for i in $(seq 1 60); do [ "$(listed kTCCServiceAccessibility)" != "0" ] && break; sleep 1; done
@@ -74,7 +74,8 @@ jobs:
           defaults write "$HOME/Library/Group Containers/group.com.apple.replayd/ScreenCaptureApprovals" "$BIN" -date "3024-01-01 00:00:00 +0000" || true
           killall replayd 2>/dev/null || true; sudo killall tccd 2>/dev/null || true
           echo "person flipped switch 2"
-          ( sleep 10; osascript -e 'tell application "System Events" to get name of every process whose visible is true and (count of windows) > 0' 2>&1 | sed 's/^/windows owned by: /' ) &
+          # The person clicks Allow on the Mac's extra screen box (it belongs to UserNotificationCenter).
+          ( for i in $(seq 1 60); do sleep 2; osascript -e 'tell application "System Events" to tell process "UserNotificationCenter" to if exists window 1 then click button "Allow" of window 1' 2>/dev/null && echo "person clicked Allow"; done ) &
           # The person clicks Allow on the Mac's extra "bypass the private window picker" box if it shows.
           ( for i in $(seq 1 40); do sleep 3; osascript -e 'tell application "System Events" to tell (first process whose frontmost is true) to if exists button "Allow" of window 1 then click button "Allow" of window 1' 2>/dev/null; osascript -e 'tell application "System Events" to repeat with p in (every process whose background only is false)
             try

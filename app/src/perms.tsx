@@ -149,7 +149,8 @@ export function Perms({ progress, onDone, onBack, Back }: { progress: React.Reac
         // permission box is on screen before calling setup done.
         const wins = await invoke<{ app: string; title: string }[]>("windows_list").catch(() => []);
         const owners = wins.map((w) => w.app).join(",");
-        const prompt = wins.some((w) => /UserNotificationCenter|ScreenCapture|replayd|universalAccess|SecurityAgent|coreautha|CoreServicesUIAgent|tccd/i.test(`${w.app} ${w.title}`));
+        // The Accessibility "would like to control" box can stay open after that switch is on; it's stale then.
+        const prompt = wins.some((w) => /UserNotificationCenter|ScreenCapture|replayd|SecurityAgent|coreautha|CoreServicesUIAgent|tccd/i.test(`${w.app} ${w.title}`) || (/universalAccess/i.test(w.app) && !p.control));
         apLog(`perm done check ok=${ok} prompt=${prompt} owners=${owners.slice(0, 300)}`);
         if (ok && !prompt) {
           localStorage.setItem("ts_capture_ok", "1");
