@@ -21,6 +21,20 @@ fn run(cmd: &str, args: &[&str]) -> Result<String, String> {
     }
 }
 
+/// Starts something (an app, a page) without waiting for it: the started app must not hold our pipes,
+/// or we'd wait until it closes.
+fn launch(cmd: &str, args: &[&str]) -> Result<String, String> {
+    use std::process::Stdio;
+    let mut c = Command::new(cmd);
+    c.args(args).stdin(Stdio::null()).stdout(Stdio::null()).stderr(Stdio::null());
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        c.creation_flags(0x0800_0000);
+    }
+    c.spawn().map(|_| "opened".to_string()).map_err(|e| e.to_string())
+}
+
 fn safe_name(s: &str) -> Result<&str, String> {
     if !s.is_empty() && s.len() < 80 && s.chars().all(|c| c.is_alphanumeric() || " ._-()".contains(c)) {
         Ok(s)
@@ -64,10 +78,10 @@ fn settings_link(pane: &str) -> Option<&'static str> {
 
 fn open(target: &str) -> Result<String, String> {
     if cfg!(target_os = "macos") {
-        run("open", &[target]).map(|_| "opened".into())
+        launch("open", &[target])
     } else {
         // Not through cmd, so nothing in a web address is treated as a command.
-        run("rundll32", &["url.dll,FileProtocolHandler", target]).map(|_| "opened".into())
+        launch("rundll32", &["url.dll,FileProtocolHandler", target])
     }
 }
 
@@ -86,9 +100,9 @@ pub async fn quick(action: String, arg: Option<String>) -> Result<String, String
             "open_app" => {
                 let name = safe_name(&arg)?;
                 if cfg!(target_os = "macos") {
-                    run("open", &["-a", name]).map(|_| "opened".into())
+                    launch("open", &["-a", name])
                 } else {
-                    run("cmd", &["/c", "start", "", name]).map(|_| "opened".into())
+                    launch("cmd", &["/c", "start", "", name])
                 }
             }
             "list_printers" => {
