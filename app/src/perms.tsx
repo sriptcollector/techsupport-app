@@ -6,7 +6,7 @@
 // Only what the first help needs is asked here (click and type, see the screen). The microphone is
 // asked the first time they talk, by the Mac's own one-click box.
 import { invoke } from "@tauri-apps/api/core";
-import { getCurrentWindow, LogicalPosition } from "@tauri-apps/api/window";
+import { getCurrentWindow, LogicalPosition, LogicalSize } from "@tauri-apps/api/window";
 import { useEffect, useRef, useState } from "react";
 import { apLog, autopilot, capture, track } from "./api";
 
@@ -15,7 +15,7 @@ const KEY = "ts_perm_stage";
 const win = getCurrentWindow();
 
 /** A drawing of the System Settings page with the exact switch to click. */
-function Picture({ pane, highlight }: { pane: "Accessibility" | "Screen & System Audio Recording"; highlight: "switch" | "reopen" | "allow" }) {
+function Picture({ pane, highlight }: { pane: "Accessibility" | "Screen & System Audio Recording"; highlight: "switch" | "reopen" | "allow" | "plus" }) {
   return (
     <svg viewBox="0 0 480 270" width="100%" role="img" aria-label={highlight === "reopen" ? `A box saying Quit & Reopen, with the Quit & Reopen button circled` : `System Settings, ${pane}, with the switch next to Tech Support circled`} style={{ display: "block", borderRadius: 12, border: "1px solid var(--hair-strong)", background: "var(--surface)" }}>
       <rect x="0" y="0" width="480" height="270" fill="var(--surface)" />
@@ -48,6 +48,15 @@ function Picture({ pane, highlight }: { pane: "Accessibility" | "Screen & System
           <path d="M392 160 L424 104" stroke="var(--careful)" strokeWidth="3" strokeLinecap="round" />
           <path d="M424 104 l-10 4 M424 104 l-1 11" stroke="var(--careful)" strokeWidth="3" strokeLinecap="round" />
           <text x="300" y="178" fontSize="13" fontWeight="600" fill="var(--careful)" fontFamily="var(--font)">Click this switch</text>
+        </g>
+      )}
+      {highlight === "plus" && (
+        <g>
+          <rect x="160" y="190" width="300" height="26" rx="6" fill="var(--bg)" stroke="var(--hair)" />
+          <text x="172" y="208" fontSize="15" fontWeight="600" fill="var(--ink)" fontFamily="var(--font)">+</text>
+          <text x="190" y="208" fontSize="15" fill="var(--ink-2)" fontFamily="var(--font)">&#8722;</text>
+          <circle cx="176" cy="203" r="14" fill="none" stroke="var(--careful)" strokeWidth="3" />
+          <text x="200" y="250" fontSize="13" fontWeight="600" fill="var(--careful)" fontFamily="var(--font)">Click + here</text>
         </g>
       )}
       {highlight === "allow" && (
@@ -106,9 +115,9 @@ export function Perms({ progress, onDone, onBack, Back }: { progress: React.Reac
   useEffect(() => {
     if (stage === "intro") return;
     const t = setTimeout(async () => {
-      const k = await win.scaleFactor();
-      const sz = (await win.outerSize()).toLogical(k);
-      win.setPosition(new LogicalPosition(Math.max(0, screen.availWidth - sz.width - 16), 36)).catch(() => {});
+      const w = 470, h = Math.min(700, screen.availHeight - 60);
+      await win.setSize(new LogicalSize(w, h)).catch(() => {});
+      win.setPosition(new LogicalPosition(Math.max(0, screen.availWidth - w - 16), 36)).catch(() => {});
     }, 450);
     moved.current = true;
     return () => clearTimeout(t);
@@ -124,7 +133,11 @@ export function Perms({ progress, onDone, onBack, Back }: { progress: React.Reac
   useEffect(() => {
     if (stage === "control") invoke("perms_open", { which: "control" });
     if (stage === "control_restart" && !p.control) invoke("perms_open", { which: "control" });
-    if (stage === "screen") invoke("perms_open", { which: "screen" });
+    if (stage === "screen") {
+      // Newer Macs only put an app in the Screen Recording list after it has tried to capture once,
+      // so try first (it's refused until the switch is on), then open the page.
+      capture(undefined, 64).catch(() => {}).finally(() => invoke("perms_open", { which: "screen" }));
+    }
     if (stage === "done") {
       // Newer Macs ask once more ("bypass the private window picker"): it comes here, guided, not
       // mid-help. We only finish setup once a real screenshot works.
@@ -153,7 +166,11 @@ export function Perms({ progress, onDone, onBack, Back }: { progress: React.Reac
 
   // CI only: after the workflow has flipped the switch, the scripted person presses "I clicked the switch".
   useEffect(() => {
-    autopilot().then((ap) => ap && (stage === "screen" || stage === "control") && setTimeout(() => relaunch(stage === "control" ? "control_restart" : "restart"), 20000));
+    let t = 0;
+    autopilot().then((ap) => {
+      if (ap && (stage === "screen" || stage === "control")) t = window.setTimeout(() => relaunch(stage === "control" ? "control_restart" : "restart"), 20000);
+    });
+    return () => clearTimeout(t);
   }, [stage]);
 
   // Screen recording needs a relaunch. If the switch is on but the Mac hasn't let us see yet, we relaunch.
@@ -199,6 +216,11 @@ export function Perms({ progress, onDone, onBack, Back }: { progress: React.Reac
         <h2 style={{ margin: "8px 0 12px" }}>Click the switch next to Tech Support</h2>
         <Picture pane="Screen & System Audio Recording" highlight="switch" />
         <p style={{ margin: "12px 0 0" }}>Then your Mac will say "Quit &amp; Reopen". Click it. I'll come right back to this spot.</p>
+        <details style={{ marginTop: 10 }}>
+          <summary className="small" style={{ cursor: "pointer" }}>Don't see Tech Support in the list?</summary>
+          <Picture pane="Screen & System Audio Recording" highlight="plus" />
+          <p className="small" style={{ margin: "8px 0 0" }}>Click <b>+</b> under the list, pick <b>Applications</b>, then <b>Tech Support</b>, then <b>Open</b>. Then click its switch.</p>
+        </details>
         <div className="grow" />
         <button className="btn primary full" onClick={() => relaunch()}>I clicked the switch</button>
         <button className="link" style={{ fontSize: 14 }} onClick={() => invoke("perms_open", { which: "screen" })}>Open the page again</button>

@@ -33,7 +33,7 @@ function textScale() {
   document.body.appendChild(el);
   const k = el.getBoundingClientRect().height / 100;
   el.remove();
-  return Math.min(2, Math.max(1, k));
+  return k < 1.15 ? 1 : Math.min(1.5, k); // only real "bigger text" settings, never font quirks
 }
 const SUGGEST = ["Make my text bigger", "Check my Wi-Fi", "Show me how to take a screenshot"];
 
@@ -71,8 +71,8 @@ export function Panel() {
     // Big system text (Windows "Text size", Mac larger text) makes everything bigger than our fixed
     // window: either the fonts grow or the whole page zooms. Measure it and grow the window to match,
     // never past the screen.
-    const k = Math.max(textScale(), base[0] / innerWidth);
-    if (k > 1.02) {
+    const k = Math.min(1.6, Math.max(textScale(), base[0] / innerWidth));
+    if (k > 1.05) {
       const z = Math.max(1, base[0] / innerWidth); // screen sizes below are in zoomed CSS pixels
       const maxW = screen.availWidth * z * 0.95, maxH = screen.availHeight * z * 0.92;
       const w = Math.min(Math.ceil(base[0] * k), maxW), h = Math.min(Math.ceil(base[1] * k), maxH);
