@@ -8,7 +8,7 @@ import { Bars } from "./bot";
 import { Mic } from "./voice";
 
 const win = getCurrentWindow();
-const PICKS = ["It moved too fast", "It clicked the wrong thing", "It talks too much"];
+const PICKS = ["It clicked the wrong thing", "It was too slow", "I didn't understand it"];
 type Result = { kind: string; title: string; line?: string; undo?: { key: string; value: unknown } };
 
 export function Report() {
@@ -72,21 +72,21 @@ export function Report() {
       {state !== "done" ? (
         <>
           <h1>Tell us what's wrong and we'll change it in under 5 minutes</h1>
-          <div className="row" style={{ flexWrap: "wrap" }}>
-            {PICKS.map((p, i) => (
-              <button key={p} className={`chip${i === 0 ? " rec" : ""}`} style={{ minHeight: 40 }} onClick={() => (micStop(), setText(p))}>{p}</button>
+          <textarea id="what" className="field" aria-label="What went wrong" value={text} placeholder="Say it or type it" onChange={(e) => (micOn && micStop(true), setText(e.target.value))} />
+          <div className="listening">{micOn ? <><Bars level={level} />Listening… just talk</> : <button className="link" style={{ padding: 0 }} onClick={micStart}>Talk instead</button>}</div>
+          <div className="row picks" aria-label="Or pick one">
+            {PICKS.map((p) => (
+              <button key={p} className="chip" onClick={() => (micStop(), setText(p))}>{p}</button>
             ))}
           </div>
-          <label className="small" htmlFor="what" style={{ marginBottom: -8 }}>What went wrong</label>
-          <textarea id="what" className="field" value={text} placeholder='Say it or type it. Like: "The voice talks too fast"' onChange={(e) => (micOn && micStop(true), setText(e.target.value))} />
-          <div className="listening">{micOn ? <><Bars level={level} />Listening…</> : <button className="link" style={{ padding: 0 }} onClick={micStart}>Turn the mic on</button>}</div>
           <label className="check">
             <input type="checkbox" checked={include} onChange={(e) => setInclude(e.target.checked)} />
-            <span>Include what happened last time<span className="small" style={{ display: "block" }}>Helps us fix it faster.</span></span>
+            <span>Include what happened last time</span>
           </label>
-          <div className="grow" />
-          <button className="btn primary full" disabled={!text.trim() || state === "sending"} onClick={send}>{state === "sending" ? "Got it. Reading what you said…" : "Send"}</button>
-          <button className="link" onClick={close}>Cancel</button>
+          <div className="row" style={{ marginTop: "auto" }}>
+            <button className="btn" onClick={close}>Cancel</button>
+            <button className="btn primary" style={{ flex: 1 }} disabled={!text.trim() || state === "sending"} onClick={send}>{state === "sending" ? "Reading what you said…" : "Send"}</button>
+          </div>
         </>
       ) : (
         <>

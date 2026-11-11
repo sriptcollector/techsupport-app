@@ -2,7 +2,11 @@
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "default",
   "description": "All Tech Support windows",
-  "windows": ["panel", "overlay", "report"],
+  "windows": [
+    "panel",
+    "overlay",
+    "report"
+  ],
   "permissions": [
     "core:default",
     "core:window:allow-show",
@@ -18,6 +22,8 @@
     "global-shortcut:allow-register",
     "global-shortcut:allow-unregister",
     "autostart:allow-enable",
-    "autostart:allow-is-enabled"
+    "autostart:allow-is-enabled",
+    "updater:default",
+    "core:window:allow-set-focusable"
   ]
 }

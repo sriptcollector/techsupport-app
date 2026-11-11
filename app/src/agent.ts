@@ -58,6 +58,8 @@ Only reverse real changes (settings, text, files). Then call done.`;
   private expected: [number, number] | null = null;
   private watching = 0;
   private busy = false;
+  /** True while a Yes card, a question or a "your turn" step is up: the person is meant to use the mouse. */
+  private waitingOnPerson = false;
   private needConfirm = false;
   private confirmed = false;
   private failures = 0;
@@ -77,7 +79,7 @@ Only reverse real changes (settings, text, files). Then call done.`;
     ov("ov:confirm", null);
     ov("ov:point", null);
     this.stopWaiters.forEach((f) => f());
-    track("help_stopped", { why });
+    track("help_stopped", { why, session: this.id, step: this.n });
     this.ui.problem("stopped");
   }
 
@@ -93,7 +95,7 @@ Only reverse real changes (settings, text, files). Then call done.`;
     this.watching = window.setInterval(async () => {
       if (this.busy || !this.expected || this.aborted) return;
       const c = await cursor().catch(() => null);
-      if (c && Math.hypot(c[0] - this.expected[0], c[1] - this.expected[1]) > 6) this.stop("mouse");
+      if (c && !this.waitingOnPerson && Math.hypot(c[0] - this.expected[0], c[1] - this.expected[1]) > 40) this.stop("mouse");
     }, 120);
   }
 
@@ -101,6 +103,7 @@ Only reverse real changes (settings, text, files). Then call done.`;
   private firstAction = false;
   private mark(what: string) {
     apLog(`timing ${what} ${Date.now() - this.t0}ms`);
+    track("help_timing", { session: this.id, what, ms: Date.now() - this.t0 });
   }
 
   async start(firstText: string, extra: any[] = []) {
@@ -174,8 +177,10 @@ Only reverse real changes (settings, text, files). Then call done.`;
           continue;
         }
         apLog(`tool ${u.name} ${JSON.stringify(u.input ?? {}).slice(0, 160)}`);
+        const tStep = Date.now();
         try {
           const out = isComputer ? await this.computer(u.name, u.input ?? {}) : await this.tool(u.name, u.input ?? {});
+          track("help_step", { session: this.id, tool: u.name, ok: true, ms: Date.now() - tStep });
           if (out === "__done__") {
             finished = true;
             results.push({ ...base, content: "OK" });
@@ -185,6 +190,7 @@ Only reverse real changes (settings, text, files). Then call done.`;
           this.failures++;
           if (this.failures >= 2) this.escalate = true; // two misses: a stronger model takes the next steps
           apLog(`tool error ${u.name}: ${msg.slice(0, 160)}`);
+          track("help_step", { session: this.id, tool: u.name, ok: false, ms: Date.now() - tStep, error: msg.slice(0, 120) });
           results.push({ ...base, is_error: true, content: isComputer ? `Error: ${msg}` : msg });
           if (isComputer) {
             // Later actions in the same batch don't run once one fails.
@@ -233,7 +239,10 @@ Only reverse real changes (settings, text, files). Then call done.`;
       }
       case "ask": {
         ov("ov:expr", { expr: "waiting" });
+        this.waitingOnPerson = true;
         const a = await this.ui.ask(i.question, i.options ?? []);
+        this.expected = await cursor().catch(() => this.expected);
+        this.waitingOnPerson = false;
         return `They answered: "${a}"`;
       }
       case "confirm": {
@@ -241,6 +250,7 @@ Only reverse real changes (settings, text, files). Then call done.`;
         ov("ov:expr", { expr: "careful" });
         hush();
         speak(i.title, s);
+        this.waitingOnPerson = true;
         const yes = await new Promise<boolean>((resolve) => {
           import("@tauri-apps/api/event").then(({ once }) => once<{ yes: boolean }>("ov:answer", (e) => resolve(e.payload.yes)));
           this.stopWaiters.push(() => resolve(false));
@@ -249,6 +259,8 @@ Only reverse real changes (settings, text, files). Then call done.`;
         });
         ov("ov:confirm", null);
         this.ui.walking(true);
+        this.expected = await cursor().catch(() => this.expected);
+        this.waitingOnPerson = false;
         this.needConfirm = false;
         this.confirmed = yes;
         track("risky_answer", { yes });
@@ -346,6 +358,20 @@ Only reverse real changes (settings, text, files). Then call done.`;
     }
   }
 
+  /** Our own windows must never receive the helper's typing. */
+  private async releaseKeyboard() {
+    const { getAllWebviewWindows } = await import("@tauri-apps/api/webviewWindow");
+    for (const w of await getAllWebviewWindows()) {
+      if (await w.isFocused().catch(() => false)) {
+        apLog(`released keyboard from ${w.label}`);
+        track("help_step", { tool: "release_keyboard", from: w.label });
+        await invoke("walk_focus", { walking: true });
+        await sleep(200);
+        break;
+      }
+    }
+  }
+
   private noteAction(name: string) {
     if (!this.firstAction && !/screenshot|zoom|wait|cursor_position/.test(name)) {
       this.firstAction = true;
@@ -417,6 +443,7 @@ Only reverse real changes (settings, text, files). Then call done.`;
         return "OK";
       }
       case "type": {
+        await this.releaseKeyboard();
         ov("ov:expr", { expr: "focused" });
         if (this.expected) ov("ov:fly", { x: this.expected[0], y: this.expected[1], ms: 200 });
         try {
@@ -428,6 +455,7 @@ Only reverse real changes (settings, text, files). Then call done.`;
         return "OK";
       }
       case "key": {
+        await this.releaseKeyboard();
         // Our own Esc must not trip the "Esc stops everything" shortcut.
         const esc = /esc/i.test(String(i.text ?? ""));
         if (esc) await unregister("Escape").catch(() => {});

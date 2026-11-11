@@ -150,9 +150,12 @@ p { margin: 0 0 16px; max-width: 42ch; }
 .target { position: absolute; border: 2px solid var(--careful); border-radius: 8px; width: 56px; height: 56px; margin: -28px 0 0 -28px; }
 
 /* ---------- report window ---------- */
-.report { height: 100%; background: var(--bg); border: 1px solid var(--hair-strong); border-radius: var(--r-panel); padding: 28px; display: flex; flex-direction: column; gap: 14px; }
+.report { height: 100%; background: var(--bg); border: 1px solid var(--hair-strong); border-radius: var(--r-panel); padding: 28px; display: flex; flex-direction: column; gap: 14px; overflow-y: auto; }
+.report > * { flex-shrink: 0; }
+.report .picks { flex-wrap: wrap; gap: 6px; }
+.report .picks .chip { min-height: 36px; padding: 6px 12px; font-size: 15px; }
 .report h1 { font-size: 24px; line-height: 30px; font-weight: 400; margin: 0; }
-textarea.field { height: 110px; padding: 12px 14px; resize: none; line-height: 23px; }
+textarea.field { height: 140px; padding: 12px 14px; resize: none; line-height: 23px; }
 .check { display: flex; gap: 10px; align-items: flex-start; font-size: 15px; }
 .check input { width: 20px; height: 20px; margin: 2px 0 0; accent-color: var(--ink); }
 

@@ -21,6 +21,8 @@ jobs:
     timeout-minutes: 50
     env:
       TS_SERVER: ${{ vars.TS_SERVER }}
+      TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+      TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ""
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
       - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2
@@ -47,10 +49,13 @@ jobs:
           mkdir -p out
           if [ "${{ runner.os }}" = "Windows" ]; then
             cp app/src-tauri/target/release/bundle/nsis/*-setup.exe "out/${{ matrix.out }}"
+            cp app/src-tauri/target/release/bundle/nsis/*-setup.exe.sig "out/${{ matrix.out }}.sig"
           else
             APP="app/src-tauri/target/universal-apple-darwin/release/bundle/macos/Tech Support.app"
             codesign --verify --deep --strict "$APP"
             ditto -c -k --keepParent "$APP" "out/${{ matrix.out }}"
+            cp "app/src-tauri/target/universal-apple-darwin/release/bundle/macos/Tech Support.app.tar.gz" "out/Tech-Support-mac.app.tar.gz"
+            cp "app/src-tauri/target/universal-apple-darwin/release/bundle/macos/Tech Support.app.tar.gz.sig" "out/Tech-Support-mac.app.tar.gz.sig"
           fi
           cd out && (sha256sum "${{ matrix.out }}" 2>/dev/null || shasum -a 256 "${{ matrix.out }}") > "${{ matrix.out }}.sha256"
       - name: Attach to release

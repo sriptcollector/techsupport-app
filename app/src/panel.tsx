@@ -65,6 +65,7 @@ export function Panel() {
   // ---------- window size and placement ----------
   async function show(v: View) {
     setView(v);
+    document.body.dataset.busy = v === "pill" || v === "bug" || v === "chat" ? "1" : "0";
     const base = SIZES[v] ?? [560, 640];
     await (SIZES[v] ? placePanel(base[0], base[1]) : win.setSize(new LogicalSize(base[0], base[1])));
     // Big system text (Windows "Text size", Mac larger text) makes everything bigger than our fixed
@@ -78,6 +79,7 @@ export function Panel() {
       await (SIZES[v] ? placePanel(w, h) : win.setSize(new LogicalSize(w, h)));
     }
     if (!SIZES[v]) await win.center();
+    if (v !== "pill") await invoke("walk_focus", { walking: false });
     await win.show();
     if (v !== "pill") await win.setFocus();
   }
@@ -256,9 +258,11 @@ export function Panel() {
         // Stop words still work while it works: the mic keeps listening for "stop".
         ensureMic(heard);
         register("Escape", () => session.current?.stop("esc")).catch(() => {});
-        show("pill");
+        await show("pill");
+        invoke("walk_focus", { walking: true });
       } else {
         unregister("Escape").catch(() => {});
+        invoke("walk_focus", { walking: false });
       }
     },
     needsYou: (text: string) => setNeeds(text),

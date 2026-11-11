@@ -148,6 +148,28 @@ fn urldecode(s: &str) -> String {
     String::from_utf8_lossy(&out).into_owned()
 }
 
+/// While the helper works, Tech Support must never hold the keyboard: otherwise what it types lands in
+/// its own window (Orion's report, 2026-11-11). The panel stops taking focus and, on a Mac, our app
+/// steps back so the app the person was using is in front again.
+#[tauri::command]
+fn walk_focus(app: AppHandle, walking: bool) {
+    if let Some(w) = app.get_webview_window("panel") {
+        let _ = w.set_focusable(!walking);
+    }
+    if walking {
+        #[cfg(target_os = "macos")]
+        {
+            let _ = app.hide();
+            if let Some(w) = app.get_webview_window("panel") {
+                let _ = w.show();
+            }
+            if let Some(o) = app.get_webview_window("overlay") {
+                let _ = o.show();
+            }
+        }
+    }
+}
+
 /// Screen recording only takes effect after a relaunch: quit and reopen ourselves (the setup step resumes).
 #[tauri::command]
 fn relaunch(app: AppHandle) {
@@ -258,6 +280,7 @@ pub fn run() {
             let _ = app.emit_to("panel", "panel-toggle", true);
         }))
         .plugin(tauri_plugin_opener::init())
+        .plugin(tauri_plugin_updater::Builder::new().build())
         .plugin(tauri_plugin_global_shortcut::Builder::new().build())
         .plugin(tauri_plugin_autostart::init(tauri_plugin_autostart::MacosLauncher::LaunchAgent, None))
         .manage(TrayRect::default())
@@ -272,6 +295,7 @@ pub fn run() {
             overlay_mode,
             panel_away,
             relaunch,
+            walk_focus,
             screen::capture,
             screen::windows_list,
             input::act,
