@@ -15,7 +15,7 @@ const KEY = "ts_perm_stage";
 const win = getCurrentWindow();
 
 /** A drawing of the System Settings page with the exact switch to click. */
-function Picture({ pane, highlight }: { pane: "Accessibility" | "Screen & System Audio Recording"; highlight: "switch" | "reopen" }) {
+function Picture({ pane, highlight }: { pane: "Accessibility" | "Screen & System Audio Recording"; highlight: "switch" | "reopen" | "allow" }) {
   return (
     <svg viewBox="0 0 480 270" width="100%" role="img" aria-label={highlight === "reopen" ? `A box saying Quit & Reopen, with the Quit & Reopen button circled` : `System Settings, ${pane}, with the switch next to Tech Support circled`} style={{ display: "block", borderRadius: 12, border: "1px solid var(--hair-strong)", background: "var(--surface)" }}>
       <rect x="0" y="0" width="480" height="270" fill="var(--surface)" />
@@ -48,6 +48,19 @@ function Picture({ pane, highlight }: { pane: "Accessibility" | "Screen & System
           <path d="M392 160 L424 104" stroke="var(--careful)" strokeWidth="3" strokeLinecap="round" />
           <path d="M424 104 l-10 4 M424 104 l-1 11" stroke="var(--careful)" strokeWidth="3" strokeLinecap="round" />
           <text x="300" y="178" fontSize="13" fontWeight="600" fill="var(--careful)" fontFamily="var(--font)">Click this switch</text>
+        </g>
+      )}
+      {highlight === "allow" && (
+        <g>
+          <rect x="140" y="40" width="200" height="200" rx="14" fill="var(--surface)" stroke="var(--hair-strong)" />
+          <rect x="222" y="54" width="36" height="36" rx="8" fill="var(--user)" />
+          <text x="240" y="112" fontSize="10.5" fontWeight="600" fill="var(--ink)" textAnchor="middle" fontFamily="var(--font)">"Tech Support" is requesting to</text>
+          <text x="240" y="126" fontSize="10.5" fontWeight="600" fill="var(--ink)" textAnchor="middle" fontFamily="var(--font)">access your screen and audio.</text>
+          <rect x="156" y="170" width="168" height="24" rx="6" fill="var(--user)" />
+          <text x="240" y="186" fontSize="12" fill="#fff" textAnchor="middle" fontFamily="var(--font)">Allow</text>
+          <rect x="156" y="200" width="168" height="24" rx="6" fill="var(--bg)" stroke="var(--hair)" />
+          <text x="240" y="216" fontSize="11" fill="var(--ink)" textAnchor="middle" fontFamily="var(--font)">Open System Settings</text>
+          <rect x="150" y="164" width="180" height="36" rx="9" fill="none" stroke="var(--careful)" strokeWidth="3" />
         </g>
       )}
       {highlight === "reopen" && (
@@ -91,17 +104,21 @@ export function Perms({ progress, onDone, onBack, Back }: { progress: React.Reac
 
   // Stand beside System Settings (it opens on the left/middle), not on top of it.
   useEffect(() => {
-    if ((stage === "control" || stage === "screen" || stage === "restart") && !moved.current) {
-      moved.current = true;
-      win.setPosition(new LogicalPosition(Math.max(0, screen.availWidth - 560 - 16), 40)).catch(() => {});
-    }
+    if (stage === "intro") return;
+    const t = setTimeout(async () => {
+      const k = await win.scaleFactor();
+      const sz = (await win.outerSize()).toLogical(k);
+      win.setPosition(new LogicalPosition(Math.max(0, screen.availWidth - sz.width - 16), 36)).catch(() => {});
+    }, 450);
+    moved.current = true;
+    return () => clearTimeout(t);
   }, [stage]);
 
   // Move on by itself the moment a switch is on.
   useEffect(() => {
     if ((stage === "control" || stage === "control_restart") && p.control) go(p.screen ? "done" : "screen");
     if ((stage === "screen" || stage === "restart") && p.screen) go("done");
-    if (stage === "intro" && p.control && p.screen) go("done");
+    if ((stage === "intro" || stage === "control" || stage === "control_restart") && p.control && p.screen) go("done");
   }, [p, stage]);
 
   useEffect(() => {
@@ -109,9 +126,23 @@ export function Perms({ progress, onDone, onBack, Back }: { progress: React.Reac
     if (stage === "control_restart" && !p.control) invoke("perms_open", { which: "control" });
     if (stage === "screen") invoke("perms_open", { which: "screen" });
     if (stage === "done") {
-      localStorage.removeItem(KEY);
-      // Newer Macs ask once more ("bypass the private window picker"): it comes here, not mid-help.
-      capture(undefined, 320).catch(() => {}).finally(() => setTimeout(onDone, 1500));
+      // Newer Macs ask once more ("bypass the private window picker"): it comes here, guided, not
+      // mid-help. We only finish setup once a real screenshot works.
+      let stop = false;
+      const tryIt = async () => {
+        if (stop) return;
+        const ok = await capture(undefined, 64).then((c) => c.w > 0).catch(() => false);
+        if (ok) {
+          localStorage.setItem("ts_capture_ok", "1");
+          localStorage.removeItem(KEY);
+          apLog("perm stage done");
+          setTimeout(onDone, 1200);
+        } else setTimeout(tryIt, 1500);
+      };
+      tryIt();
+      return () => {
+        stop = true;
+      };
     }
   }, [stage]);
 
@@ -184,8 +215,10 @@ export function Perms({ progress, onDone, onBack, Back }: { progress: React.Reac
       </>
     ) : (
       <>
-        <h1>All set. That was the hard part.</h1>
-        <p>If your Mac asks once more about seeing the screen, click Allow.</p>
+        <span className="mono">Last step</span>
+        <h2 style={{ margin: "8px 0 12px" }}>If your Mac asks once more, click Allow</h2>
+        <Picture pane="Screen & System Audio Recording" highlight="allow" />
+        <p style={{ margin: "12px 0 0" }}>That box is the Mac double-checking. Click the blue Allow button. I'll carry on by myself.</p>
       </>
     );
 

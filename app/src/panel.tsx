@@ -123,7 +123,7 @@ export function Panel() {
     if (!m.canUse && m.why === "no_plan") return show("trial");
     if (env.os === "mac") {
       const p = await invoke<{ screen: boolean; control: boolean }>("perms_status");
-      if (!p.screen || !p.control) return show("perms");
+      if (!p.screen || !p.control || !localStorage.getItem("ts_capture_ok")) return show("perms");
     }
     if (firstRun.current || openAfter) {
       firstRun.current = false;
@@ -549,7 +549,12 @@ export function Panel() {
                   <ol>{card.steps.map((s, i) => <li key={i}>{s}</li>)}</ol>
                 </>
               )}
-              {!card.worked ? (
+              {card.worked && !session.current?.journal.some((j) => j.did) ? (
+                <div className="chips" style={{ marginTop: 12 }}>
+                  <button className="chip rec" autoFocus onClick={() => (track("fix_confirmed", { yes: true, kind: "answer" }), setCard(null), overlayMode(false), setTimeout(() => win.hide(), 800))}>Thanks</button>
+                  <button className="chip" onClick={() => (setCard(null), say("bot", "What else would you like to know?"), ensureMic(heard))}>Ask something else</button>
+                </div>
+              ) : !card.worked ? (
                 <div className="chips" style={{ marginTop: 12 }}>
                   <button className="chip rec" autoFocus onClick={() => (setCard(null), session.current?.more("Try again a different way. Take a screenshot first."))}>Try again<span className="tag">Recommended</span></button>
                   <button className="chip" onClick={() => (setCard(null), session.current?.more(SHOW_ME))}>Show me, I'll click</button>
@@ -723,7 +728,7 @@ function SignIn({ progress, onDone, onBack, who, onSignOut }: { progress: React.
 
 // ---------- S4 free week (card first) ----------
 function Trial({ progress, me, onDone, onBack }: { progress: React.ReactNode; me: Me | null; onDone: () => void; onBack: () => void }) {
-  const [plan, setPlan] = useState<"yearly" | "monthly">("yearly");
+  const [plan, setPlan] = useState<"yearly" | "monthly">("monthly");
   const [state, setState] = useState<"idle" | "opening" | "waiting" | "error">("idle");
   const used = me?.hadTrial;
   useEffect(() => {
@@ -732,6 +737,7 @@ function Trial({ progress, me, onDone, onBack }: { progress: React.ReactNode; me
       const m = await api<Me>("/api/me").catch(() => null);
       if (m?.canUse) {
         clearInterval(iv);
+        getCurrentWindow().show();
         track("trial_started", { plan });
         onDone();
       }
@@ -749,6 +755,8 @@ function Trial({ progress, me, onDone, onBack }: { progress: React.ReactNode; me
       const url = r.url!.startsWith("/") ? (await server()) + r.url : r.url!;
       await openUrl(url);
       setState("waiting");
+      // Don't sit on top of the card page: step aside, come back by itself when the free week starts.
+      setTimeout(() => getCurrentWindow().hide(), 600);
       // CI only: the scripted person presses the test checkout's one button (staging's fake Stripe).
       if ((await autopilot()) && url.includes("/staging/checkout/")) setTimeout(() => fetch(`${url}/complete`, { method: "POST", redirect: "manual" }).catch((e) => apLog(`checkout complete failed ${e}`)), 5000);
     } catch (e) {
@@ -764,12 +772,12 @@ function Trial({ progress, me, onDone, onBack }: { progress: React.ReactNode; me
         <Back onClick={state === "waiting" ? () => setState("idle") : onBack} />
         <h1>{used ? "Keep your help going" : "Free for 7 days"}</h1>
         <div className="stack" style={{ width: "100%", margin: "8px 0 16px" }} role="radiogroup" aria-label="Plan">
+          <button role="radio" aria-checked={plan === "monthly"} className={`chip${plan === "monthly" ? " rec" : ""}`} onClick={() => setPlan("monthly")}>
+            <span>Monthly · $20/month</span>
+          </button>
           <button role="radio" aria-checked={plan === "yearly"} className={`chip${plan === "yearly" ? " rec" : ""}`} onClick={() => setPlan("yearly")}>
             <span>Yearly · $16/month<span className="small" style={{ display: "block" }}>Billed $192 a year</span></span>
             <span className="tag">Save $48</span>
-          </button>
-          <button role="radio" aria-checked={plan === "monthly"} className={`chip${plan === "monthly" ? " rec" : ""}`} onClick={() => setPlan("monthly")}>
-            <span>Monthly · $20/month</span>
           </button>
         </div>
         <ul className="small" style={{ textAlign: "left", margin: "0 0 16px", paddingLeft: 20, lineHeight: "24px", color: "var(--ink)" }}>

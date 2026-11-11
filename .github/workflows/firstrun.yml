@@ -52,7 +52,8 @@ jobs:
           ( i=0; while true; do screencapture -x "frames/f-$(printf %04d $i).png"; i=$((i+1)); sleep 1; done ) & SHOOT=$!
           open "$APP"
           fail=0
-          listed() { sudo sqlite3 "$SYS" "select count(*) from access where service='$1' and (client like '%techsupport%' or client like '%tech-support%');"; }
+          USR="$HOME/Library/Application Support/com.apple.TCC/TCC.db"
+          listed() { a=$(sudo sqlite3 "$SYS" "select count(*) from access where service='$1' and (client like '%techsupport%' or client like '%tech-support%');"); b=$(sqlite3 "$USR" "select count(*) from access where service='$1' and (client like '%techsupport%' or client like '%tech-support%');" 2>/dev/null || echo 0); echo $((a+b)); }
           # Switch 1: Accessibility. Tech Support must already be in the list (no "+").
           for i in $(seq 1 60); do [ "$(listed kTCCServiceAccessibility)" != "0" ] && break; sleep 1; done
           if [ "$(listed kTCCServiceAccessibility)" = "0" ]; then echo "GATE FAIL: Tech Support not listed under Accessibility (person would need +)"; fail=1; else echo "GATE OK: listed under Accessibility"; fi
@@ -68,12 +69,18 @@ jobs:
           sudo sqlite3 "$SYS" "update access set auth_value=2 where service='kTCCServiceScreenCapture' and (client like '%techsupport%' or client like '%tech-support%');"
           sudo sqlite3 "$SYS" "insert or replace into access (service,client,client_type,auth_value,auth_reason,auth_version,flags) values ('kTCCServiceScreenCapture','$BID',0,2,4,1,0);" || true
           defaults write "$HOME/Library/Group Containers/group.com.apple.replayd/ScreenCaptureApprovals" "$BIN" -date "3024-01-01 00:00:00 +0000" || true
-          sudo killall tccd 2>/dev/null || true
+          killall replayd 2>/dev/null || true; sudo killall tccd 2>/dev/null || true
           echo "person flipped switch 2"
+          # The person clicks Allow on the Mac's extra "bypass the private window picker" box if it shows.
+          ( for i in $(seq 1 40); do sleep 3; osascript -e 'tell application "System Events" to tell (first process whose frontmost is true) to if exists button "Allow" of window 1 then click button "Allow" of window 1' 2>/dev/null; osascript -e 'tell application "System Events" to repeat with p in (every process whose background only is false)
+            try
+              if exists (button "Allow" of window 1 of p) then click button "Allow" of window 1 of p
+            end try
+          end repeat' 2>/dev/null; done ) &
           # The app relaunches itself and resumes; then the first help runs.
           end=$(( $(date +%s) + 600 ))
           while [ $(date +%s) -lt $end ]; do sleep 3; grep -qE 'DONE|PROBLEM|STOPPED' "$LOG" 2>/dev/null && { sleep 6; break; }; done
-          grep -q "perm relaunch" "$LOG" && grep -q "perm stage done" "$LOG" && echo "GATE OK: relaunched itself and resumed" || { echo "GATE FAIL: no clean resume after relaunch"; fail=1; }
+          grep -q "perm relaunch" "$LOG" && grep -q "perm stage done" "$LOG" && echo "GATE OK: relaunched itself, resumed and confirmed a real screenshot" || { echo "GATE FAIL: no clean resume after relaunch"; fail=1; }
           grep -E "DONE worked=true" "$LOG" && echo "GATE OK: first help worked" || { echo "GATE FAIL: first help didn't finish"; fail=1; }
           pkill -f "Tech Support.app/Contents/MacOS" || true; kill $SHOOT || true
           curl -fsS -X DELETE "$STAGING/api/ops/users/$EMAIL" -H "authorization: Bearer $TOKEN" || true

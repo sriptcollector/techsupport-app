@@ -232,11 +232,9 @@ fn overlay_mode(app: AppHandle, visible: bool, interactive: bool) {
     }
 }
 
-fn protect(w: &WebviewWindow) {
-    // The helper's own windows never appear in the screenshots the AI sees.
-    if std::env::var("TECHSUPPORT_SHOW_IN_CAPTURE").is_err() {
-        let _ = w.set_content_protected(true);
-    }
+fn protect(_w: &WebviewWindow) {
+    // Our windows stay visible to the person's own screenshots and screen sharing (a grandkid helping
+    // over Zoom must see them). They're hidden only for the instant the AI takes its picture (api.ts).
 }
 
 fn toggle_panel(app: &AppHandle) {

@@ -97,7 +97,7 @@ export type Shot = { data: string; w: number; h: number; sw: number; sh: number;
 // consumer test that protection is off so the VM screenshots show the helper, so we hide our
 // windows for the moment of the AI's screenshot instead: the AI sees what a real user's AI would.
 export async function capture(region?: [number, number, number, number], max = 1280) {
-  const veil = (await getEnv()).show_in_capture;
+  const veil = true; // always: our windows step aside for the AI's picture only
   if (veil) {
     await emit("veil", true);
     await new Promise((r) => setTimeout(r, 180));
