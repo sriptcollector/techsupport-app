@@ -3,6 +3,7 @@
 // the mouse, presses Esc, says "stop", or presses Stop.
 import { emitTo } from "@tauri-apps/api/event";
 import { register, unregister } from "@tauri-apps/plugin-global-shortcut";
+import { invoke } from "@tauri-apps/api/core";
 import { act, apLog, api, autopilot, ApiError, capture, cursor, getEnv, hush, speak, track, type Me, type Shot } from "./api";
 import type { Expr } from "./bot";
 
@@ -96,13 +97,27 @@ Only reverse real changes (settings, text, files). Then call done.`;
     }, 120);
   }
 
+  private t0 = 0;
+  private firstAction = false;
+  private mark(what: string) {
+    apLog(`timing ${what} ${Date.now() - this.t0}ms`);
+  }
+
   async start(firstText: string, extra: any[] = []) {
+    this.t0 = Date.now();
     const env = await getEnv();
+    // Something visible right away (well under a second): the helper appears and says it's on it.
+    this.ui.walking(true);
+    ov("ov:mode", { mode: "walk" });
+    ov("ov:expr", { expr: "thinking" });
+    cursor().then((c) => c && ov("ov:fly", { x: c[0], y: c[1], ms: 1 }));
+    ov("ov:say", { text: "On it. Looking at your screen.", spoken: 99 });
+    this.mark("first_visible");
     this.shot = await capture();
     ov("ov:screen", { sw: this.shot.sw, sh: this.shot.sh });
     this.messages.push({ role: "user", content: [{ type: "text", text: firstText }, ...extra, { type: "image", source: { type: "base64", media_type: "image/jpeg", data: this.shot.data } }] });
     this.task = firstText.slice(0, 60);
-    if (/show me (how|where)|let me (click|do it)|do it myself/i.test(firstText)) this.pick = "show";
+    if (/show me (how|where)|let me (click|do it)|do it myself|want to learn how/i.test(firstText)) this.pick = "show";
     track("help_started", { mode: this.mode, os: env.os });
     await this.loop();
   }
@@ -209,14 +224,11 @@ Only reverse real changes (settings, text, files). Then call done.`;
         this.n = Math.max(this.n, Math.min(this.total || 99, Number(i.step) || this.n || 1));
         this.ui.progress(this.n, Math.max(this.total, this.n), this.task);
         ov("ov:expr", { expr: (i.expression as Expr) ?? "focused" });
-        const words = i.text.split(" ").length;
-        ov("ov:say", { text: i.text, spoken: 0 });
-        let k = 0;
-        const t = setInterval(() => ov("ov:say", { text: i.text, spoken: ++k }), s.speech === "slow" ? 380 : 300);
-        await Promise.race([speak(i.text, s), new Promise<void>((r) => this.stopWaiters.push(r))]);
-        clearInterval(t);
-        ov("ov:say", { text: i.text, spoken: words });
+        ov("ov:say", { text: i.text, spoken: 999 });
         this.note({ said: i.text });
+        // Spoken only if they turned "Talk out loud" on; either way the next action starts right away.
+        if (s.voice) speak(i.text, s);
+        await sleep(250);
         return "OK";
       }
       case "ask": {
@@ -274,6 +286,13 @@ Only reverse real changes (settings, text, files). Then call done.`;
         this.watch();
         return "They did it. Take a screenshot to see what changed.";
       }
+      case "quick": {
+        this.noteAction("quick");
+        this.note({ did: `quick ${i.action} ${i.arg ?? ""}` });
+        ov("ov:expr", { expr: "focused" });
+        const out = await invoke<string>("quick", { action: i.action, arg: i.arg || null });
+        return `Done: ${String(out).slice(0, 1200)}`;
+      }
       case "done": {
         this.end();
         ov("ov:expr", { expr: i.worked ? "happy" : "sorry" });
@@ -327,7 +346,15 @@ Only reverse real changes (settings, text, files). Then call done.`;
     }
   }
 
+  private noteAction(name: string) {
+    if (!this.firstAction && !/screenshot|zoom|wait|cursor_position/.test(name)) {
+      this.firstAction = true;
+      this.mark(`first_action ${name}`);
+    }
+  }
+
   private async computer(name: string, i: any): Promise<any> {
+    this.noteAction(name);
     if (!/screenshot|zoom|wait|cursor_position|mouse_move/.test(name)) this.note({ did: `${name} ${JSON.stringify(i)}` });
     if (this.pick !== "do" && /click|drag|type|key|scroll|mouse_down|mouse_up/.test(name)) throw new Error("In this mode don't click or type. Use mouse_move and needs_you.");
     if (this.needConfirm && /click|key|type/.test(name)) {
@@ -359,13 +386,13 @@ Only reverse real changes (settings, text, files). Then call done.`;
       case "triple_click": {
         let p = this.expected ?? [0, 0];
         if (i.coordinate) p = await this.moveTo(i.coordinate);
-        await sleep(350); // the eye catches up before the press
+        await sleep(150); // the eye catches up before the press
         ov("ov:expr", { expr: "pressing" });
         ov("ov:press", { x: p[0], y: p[1] });
         const count = name === "double_click" ? 2 : name === "triple_click" ? 3 : 1;
         await this.doing(() => act({ do: "click", x: p[0], y: p[1], button: name === "right_click" ? "right" : name === "middle_click" ? "middle" : "left", count, modifiers: i.text ?? null }), p);
         ov("ov:expr", { expr: "focused" });
-        await sleep(600); // let the screen settle
+        await sleep(350); // let the screen settle
         return "OK";
       }
       case "left_click_drag": {
@@ -391,6 +418,7 @@ Only reverse real changes (settings, text, files). Then call done.`;
       }
       case "type": {
         ov("ov:expr", { expr: "focused" });
+        if (this.expected) ov("ov:fly", { x: this.expected[0], y: this.expected[1], ms: 200 });
         try {
           await this.doing(() => act({ do: "type", text: String(i.text ?? "") }), null);
         } catch (e) {
@@ -405,7 +433,7 @@ Only reverse real changes (settings, text, files). Then call done.`;
         if (esc) await unregister("Escape").catch(() => {});
         await this.doing(() => act({ do: "key", combo: String(i.text ?? ""), repeat: i.repeat ?? 1 }), null);
         if (esc && !this.aborted) await register("Escape", () => this.stop("esc")).catch(() => {});
-        await sleep(500);
+        await sleep(300);
         return "OK";
       }
       case "wait":

@@ -1,0 +1,133 @@
+name: First run from default state
+# The release gate for system prompts (Orion's rule "Guide every system prompt, test from default state").
+# Mac: permissions are RESET (tccutil), never pre-granted. The app must add itself to each Settings list
+# (nobody presses "+"), guide each switch, notice the moment it's on, and resume after its own relaunch.
+# The workflow plays the person: it waits for Tech Support to appear in the list, then flips the switch
+# the way a person would. Any check failing fails the release. Frames every second -> a video.
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Release tag published to the test download channel
+        required: true
+permissions:
+  contents: write
+env:
+  STAGING: ${{ vars.TS_STAGING }}
+  TS_DOWNLOADS: https://storage.googleapis.com/westward-apps-prod-techsupport/downloads/test/${{ inputs.tag }}
+  BID: ai.westwardconsulting.techsupport
+jobs:
+  mac:
+    runs-on: macos-latest
+    timeout-minutes: 40
+    steps:
+      - name: Install like a customer
+        run: |
+          curl -fsSL "$STAGING/install.sh" | sh
+          sleep 6; pkill -f "Tech Support.app/Contents/MacOS" || true
+          APP=/Applications/"Tech Support.app"; [ -d "$APP" ] || APP="$HOME/Applications/Tech Support.app"
+          echo "APP=$APP" >> $GITHUB_ENV
+      - name: True default state (reset every permission)
+        run: |
+          tccutil reset All "$BID" || true
+          sudo tccutil reset All "$BID" || true
+          SYS="/Library/Application Support/com.apple.TCC/TCC.db"
+          echo "rows for Tech Support before: $(sudo sqlite3 "$SYS" "select count(*) from access where client like '%techsupport%' or client like '%tech-support%';")"
+      - name: First run, recorded
+        env:
+          TEST_LOGIN: ${{ secrets.TS_STAGING_TEST_LOGIN }}
+        run: |
+          set -u
+          mkdir -p frames
+          SYS="/Library/Application Support/com.apple.TCC/TCC.db"
+          n="${{ github.run_number }}91"
+          R=$(curl -fsS -X POST -d "" "$STAGING/auth/test?n=$n" -H "x-test-login: $TEST_LOGIN")
+          TOKEN=$(echo "$R" | python3 -c 'import sys,json;print(json.load(sys.stdin)["token"])')
+          EMAIL=$(echo "$R" | python3 -c 'import sys,json,urllib.parse;print(urllib.parse.quote(json.load(sys.stdin)["email"]))')
+          URL=$(curl -fsS -X POST "$STAGING/api/checkout" -H "authorization: Bearer $TOKEN" -H "content-type: application/json" -d '{"plan":"monthly"}' | python3 -c 'import sys,json;print(json.load(sys.stdin)["url"])')
+          curl -s -o /dev/null -X POST -d "" "$STAGING$URL/complete"
+          launchctl setenv TECHSUPPORT_TEST_SESSION "$TOKEN"; launchctl setenv TECHSUPPORT_SERVER "$STAGING"; launchctl setenv TECHSUPPORT_SHOW_IN_CAPTURE 1
+          launchctl setenv TECHSUPPORT_AUTOPILOT "how:Make the text on my screen bigger"
+          LOG="$PWD/frames/firstrun.log"; launchctl setenv TECHSUPPORT_AUTOPILOT_LOG "$LOG"
+          ( i=0; while true; do screencapture -x "frames/f-$(printf %04d $i).png"; i=$((i+1)); sleep 1; done ) & SHOOT=$!
+          open "$APP"
+          fail=0
+          listed() { sudo sqlite3 "$SYS" "select count(*) from access where service='$1' and (client like '%techsupport%' or client like '%tech-support%');"; }
+          # Switch 1: Accessibility. Tech Support must already be in the list (no "+").
+          for i in $(seq 1 60); do [ "$(listed kTCCServiceAccessibility)" != "0" ] && break; sleep 1; done
+          if [ "$(listed kTCCServiceAccessibility)" = "0" ]; then echo "GATE FAIL: Tech Support not listed under Accessibility (person would need +)"; fail=1; else echo "GATE OK: listed under Accessibility"; fi
+          sleep 8   # the guide is on screen next to System Settings
+          sudo sqlite3 "$SYS" "update access set auth_value=2 where service='kTCCServiceAccessibility' and (client like '%techsupport%' or client like '%tech-support%');"; sudo killall tccd 2>/dev/null || true
+          echo "person flipped switch 1"
+          # Switch 2: Screen recording.
+          for i in $(seq 1 60); do [ "$(listed kTCCServiceScreenCapture)" != "0" ] && break; grep -q "perm stage screen" "$LOG" 2>/dev/null && [ $i -gt 20 ] && break; sleep 1; done
+          if [ "$(listed kTCCServiceScreenCapture)" = "0" ]; then echo "GATE FAIL: Tech Support not listed under Screen Recording (person would need +)"; fail=1; else echo "GATE OK: listed under Screen Recording"; fi
+          grep -q "perm stage screen" "$LOG" && echo "GATE OK: moved on by itself after switch 1" || { echo "GATE FAIL: did not move on after switch 1"; fail=1; }
+          sleep 6
+          BIN="$APP/Contents/MacOS/tech-support"
+          sudo sqlite3 "$SYS" "update access set auth_value=2 where service='kTCCServiceScreenCapture' and (client like '%techsupport%' or client like '%tech-support%');"
+          sudo sqlite3 "$SYS" "insert or replace into access (service,client,client_type,auth_value,auth_reason,auth_version,flags) values ('kTCCServiceScreenCapture','$BID',0,2,4,1,0);" || true
+          defaults write "$HOME/Library/Group Containers/group.com.apple.replayd/ScreenCaptureApprovals" "$BIN" -date "3024-01-01 00:00:00 +0000" || true
+          sudo killall tccd 2>/dev/null || true
+          echo "person flipped switch 2"
+          # The app relaunches itself and resumes; then the first help runs.
+          end=$(( $(date +%s) + 600 ))
+          while [ $(date +%s) -lt $end ]; do sleep 3; grep -qE 'DONE|PROBLEM|STOPPED' "$LOG" 2>/dev/null && { sleep 6; break; }; done
+          grep -q "perm relaunch" "$LOG" && grep -q "perm stage done" "$LOG" && echo "GATE OK: relaunched itself and resumed" || { echo "GATE FAIL: no clean resume after relaunch"; fail=1; }
+          grep -E "DONE worked=true" "$LOG" && echo "GATE OK: first help worked" || { echo "GATE FAIL: first help didn't finish"; fail=1; }
+          pkill -f "Tech Support.app/Contents/MacOS" || true; kill $SHOOT || true
+          curl -fsS -X DELETE "$STAGING/api/ops/users/$EMAIL" -H "authorization: Bearer $TOKEN" || true
+          cat "$LOG"
+          echo "fail=$fail" > frames/gate.txt
+          exit $fail
+      - name: Attach the recording
+        if: always()
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          tag="firstrun-${GITHUB_RUN_NUMBER}"
+          gh release view "$tag" -R "$GITHUB_REPOSITORY" >/dev/null 2>&1 || gh release create "$tag" -R "$GITHUB_REPOSITORY" --prerelease --title "First run from default state ${GITHUB_RUN_NUMBER}" --notes "Frames every second" || true
+          (cd frames && zip -qr ../mac-firstrun.zip .) && gh release upload "$tag" -R "$GITHUB_REPOSITORY" mac-firstrun.zip --clobber
+
+  windows:
+    runs-on: windows-latest
+    timeout-minutes: 30
+    steps:
+      - name: Install like a customer
+        shell: powershell
+        run: |
+          irm "$env:STAGING/install.ps1" | iex
+          Start-Sleep 8; Get-Process tech-support -ErrorAction SilentlyContinue | Stop-Process -Force
+      - name: First run, recorded
+        shell: powershell
+        env:
+          TEST_LOGIN: ${{ secrets.TS_STAGING_TEST_LOGIN }}
+        run: |
+          New-Item -ItemType Directory -Force frames | Out-Null
+          $n = "${{ github.run_number }}92"
+          $r = Invoke-RestMethod -Method Post -Uri "$env:STAGING/auth/test?n=$n" -Headers @{ 'x-test-login' = $env:TEST_LOGIN }
+          $env:TECHSUPPORT_TEST_SESSION = $r.token; $env:TECHSUPPORT_SERVER = $env:STAGING; $env:TECHSUPPORT_SHOW_IN_CAPTURE = '1'
+          $env:TECHSUPPORT_AUTOPILOT = "how:Make the text on my screen bigger"; $env:TECHSUPPORT_AUTOPILOT_LOG = "$PWD\frames\firstrun.log"
+          @'
+          Add-Type -AssemblyName System.Windows.Forms,System.Drawing
+          $i = 0
+          while ($true) { $b = [System.Windows.Forms.Screen]::PrimaryScreen.Bounds; $bmp = New-Object System.Drawing.Bitmap $b.Width, $b.Height
+            [System.Drawing.Graphics]::FromImage($bmp).CopyFromScreen($b.Location, [System.Drawing.Point]::Empty, $b.Size); $bmp.Save(("frames\f-{0:D4}.png" -f $i)); $bmp.Dispose(); $i++; Start-Sleep -Milliseconds 1000 }
+          '@ | Set-Content shoot.ps1
+          $shooter = Start-Process powershell -ArgumentList '-NoProfile','-File','shoot.ps1' -PassThru -WindowStyle Hidden
+          $app = Start-Process "$env:LOCALAPPDATA\Tech Support\tech-support.exe" -PassThru
+          $deadline = (Get-Date).AddMinutes(12)
+          while ((Get-Date) -lt $deadline) { Start-Sleep 3; if ((Test-Path $env:TECHSUPPORT_AUTOPILOT_LOG) -and (Select-String -Path $env:TECHSUPPORT_AUTOPILOT_LOG -Pattern 'DONE|PROBLEM|STOPPED' -Quiet)) { Start-Sleep 6; break } }
+          Stop-Process -Id $app.Id -Force -ErrorAction SilentlyContinue; Stop-Process -Id $shooter.Id -Force -ErrorAction SilentlyContinue
+          try { Invoke-RestMethod -Method Delete -Uri "$env:STAGING/api/ops/users/$([uri]::EscapeDataString($r.email))" -Headers @{ authorization = "Bearer $($r.token)" } | Out-Null } catch {}
+          Get-Content $env:TECHSUPPORT_AUTOPILOT_LOG
+          if (-not (Select-String -Path $env:TECHSUPPORT_AUTOPILOT_LOG -Pattern 'DONE worked=true' -Quiet)) { Write-Host "GATE FAIL: first help didn't finish"; exit 1 }
+      - name: Attach the recording
+        if: always()
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          tag="firstrun-${GITHUB_RUN_NUMBER}"
+          gh release view "$tag" -R "$GITHUB_REPOSITORY" >/dev/null 2>&1 || gh release create "$tag" -R "$GITHUB_REPOSITORY" --prerelease --title "First run from default state ${GITHUB_RUN_NUMBER}" --notes "Frames every second" || true
+          7z a -tzip windows-firstrun.zip ./frames/* >/dev/null && gh release upload "$tag" -R "$GITHUB_REPOSITORY" windows-firstrun.zip --clobber

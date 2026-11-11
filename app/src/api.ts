@@ -115,7 +115,7 @@ export const windowsList = () => invoke<Win[]>("windows_list");
 export const overlayMode = (visible: boolean, interactive = false) => invoke("overlay_mode", { visible, interactive });
 export const placePanel = (width: number, height: number) => invoke("place_panel", { width, height });
 
-// ---------- speech out (the computer's own voices: free, no audio leaves the device) ----------
+// ---------- speech out: off unless "Talk out loud" is on in Settings (Orion, 2026-11-11) ----------
 let voice: SpeechSynthesisVoice | null = null;
 function pickVoice() {
   const vs = speechSynthesis.getVoices().filter((v) => v.lang.startsWith("en"));
@@ -126,16 +126,15 @@ if ("speechSynthesis" in window) {
   speechSynthesis.onvoiceschanged = pickVoice;
 }
 export function speak(text: string, s?: Me["settings"]): Promise<void> {
-  if (!("speechSynthesis" in window) || s?.voice === false) return new Promise((r) => setTimeout(r, Math.min(2500, 300 + text.length * 45)));
+  if (!s?.voice || !("speechSynthesis" in window)) return Promise.resolve();
   return new Promise((resolve) => {
     speechSynthesis.cancel();
     const u = new SpeechSynthesisUtterance(text);
     if (voice) u.voice = voice;
-    u.rate = s?.speech === "slow" ? 0.85 : s?.speech === "fast" ? 1.15 : 1;
-    const done = () => resolve();
-    u.onend = done;
-    u.onerror = done;
-    setTimeout(done, 1200 + text.length * 90);
+    u.rate = s.speech === "slow" ? 0.85 : s.speech === "fast" ? 1.15 : 1;
+    u.onend = () => resolve();
+    u.onerror = () => resolve();
+    setTimeout(resolve, 1200 + text.length * 90);
     speechSynthesis.speak(u);
   });
 }

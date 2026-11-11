@@ -11,6 +11,7 @@ import { Session, type Pick } from "./agent";
 import { apLog, api, ApiError, autopilot, capture, getEnv, hush, loadToken, overlayMode, placePanel, server, setToken, setUser, speak, track, type Me } from "./api";
 import { Bars, Bot } from "./bot";
 import { Mic, saidStop, saidThatsAll } from "./voice";
+import { Perms } from "./perms";
 
 type View = "loading" | "welcome" | "signin" | "trial" | "perms" | "home" | "chat" | "pill" | "bug" | "settings";
 type Line = { who: "bot" | "me"; text: string; pin?: number | null };
@@ -23,7 +24,7 @@ type Card =
   | null;
 
 const win = getCurrentWindow();
-const SIZES: Partial<Record<View, [number, number]>> = { home: [380, 352], chat: [380, 540], bug: [380, 460], pill: [380, 64], settings: [380, 520] };
+const SIZES: Partial<Record<View, [number, number]>> = { home: [380, 424], chat: [380, 540], bug: [380, 460], pill: [380, 64], settings: [380, 520] };
 const SHOW_ME = `Switch to "Show me, I'll click": point with mouse_move and use needs_you; don't click.`;
 function textScale() {
   const el = document.createElement("span");
@@ -180,10 +181,12 @@ export function Panel() {
   }
 
   // ---------- "I don't know how to do something" ----------
-  function startHow(prefill?: string) {
-    track("cta_click", { cta: "how" });
+  const learning = useRef(false);
+  function startHow(prefill?: string, learn = false) {
+    track("cta_click", { cta: learn ? "learn" : "how" });
     if (!meRef.current?.canUse) return blocked();
-    setLines([{ who: "bot", text: "What are you trying to do?" }]);
+    learning.current = learn;
+    setLines([{ who: "bot", text: learn ? "What do you want to learn?" : "What are you trying to do?" }]);
     setCard(null);
     setDraft("");
     session.current = null;
@@ -206,7 +209,7 @@ export function Panel() {
       waiter.current = null;
       return w(t);
     }
-    if (!s) return begin("how", `They said: "${t}"`);
+    if (!s) return begin("how", learning.current ? `They want to learn how: "${t}". Teach them: for each step point at the spot (mouse_move) and let them click it themselves (needs_you), with one short line on why.` : `They said: "${t}"`);
     setThinking(true);
     s.more(t).finally(() => setThinking(false));
   }
@@ -440,7 +443,7 @@ export function Panel() {
   if (view === "signin")
     return <SignIn progress={progressBar(1)} who={me?.email ?? null} onBack={() => setView("welcome")} onSignOut={async () => (await setToken(null), setMe(null))} onDone={() => (track("sign_up"), route(true))} />;
   if (view === "trial") return <Trial progress={progressBar(2)} me={me} onBack={() => setView("signin")} onDone={() => route(true)} />;
-  if (view === "perms") return <Perms progress={progressBar(3)} onBack={() => setView(me?.canUse ? "signin" : "trial")} onDone={() => show("home")} />;
+  if (view === "perms") return <Perms progress={progressBar(3)} Back={Back} onBack={() => setView(me?.canUse ? "signin" : "trial")} onDone={() => show("home")} />;
   if (view === "settings") return <Settings me={me!} onBack={() => show("home")} onChange={setMe} onSignOut={async () => (await setToken(null), setMe(null), show("signin"))} />;
 
   if (view === "home")
@@ -451,13 +454,17 @@ export function Panel() {
             <Bot expr="idle" size={32} />
             <h2>What do you need?</h2>
           </div>
-          <button className="big primary" autoFocus onClick={() => startHow()}>
+          <button className="big tone-how" autoFocus onClick={() => startHow()}>
             <ChatIcon />
             I don't know how to do something
           </button>
-          <button className="big" onClick={startBug}>
+          <button className="big tone-fix" onClick={startBug}>
             <WrenchIcon />
             Something is broken
+          </button>
+          <button className="big tone-learn" onClick={() => startHow(undefined, true)}>
+            <LearnIcon />
+            Learn something
           </button>
           <hr style={{ border: 0, borderTop: "1px solid var(--hair)", margin: "6px 0", width: "100%" }} />
           <button className="big" onClick={() => (win.hide(), emitTo("report", "report-open", {}))}>
@@ -781,68 +788,6 @@ function Trial({ progress, me, onDone, onBack }: { progress: React.ReactNode; me
   );
 }
 
-// ---------- S6 the one permission step (Mac) ----------
-function Perms({ progress, onDone, onBack }: { progress: React.ReactNode; onDone: () => void; onBack: () => void }) {
-  const [p, setP] = useState({ mic: false, screen: false, control: false });
-  const [going, setGoing] = useState(false);
-  useEffect(() => {
-    const iv = setInterval(async () => {
-      const s = await invoke<{ screen: boolean; control: boolean }>("perms_status");
-      setP((x) => ({ ...x, ...s }));
-    }, 500);
-    return () => clearInterval(iv);
-  }, []);
-  useEffect(() => {
-    if (!(p.mic && p.screen && p.control)) return;
-    // Newer Macs ask once more ("bypass the private window picker"): ask it here, not mid-help.
-    capture(undefined, 320).catch(() => {}).finally(() => setTimeout(onDone, 900));
-  }, [p]);
-  async function turnOn() {
-    setGoing(true);
-    if (!p.mic) {
-      const ok = await navigator.mediaDevices?.getUserMedia({ audio: true }).then((s) => (s.getTracks().forEach((t) => t.stop()), true)).catch(() => false);
-      setP((x) => ({ ...x, mic: !!ok }));
-    }
-    const s = await invoke<{ screen: boolean; control: boolean }>("perms_status");
-    if (!s.control) await invoke("perms_open", { which: "control" });
-    else if (!s.screen) await invoke("perms_open", { which: "screen" });
-  }
-  useEffect(() => {
-    // After Accessibility is on, go straight to the screen switch.
-    if (going && p.control && !p.screen) invoke("perms_open", { which: "screen" });
-  }, [p.control]);
-  const row = (on: boolean, name: string, os: string) => (
-    <div className="row" style={{ padding: "12px 0", borderBottom: "1px solid var(--hair)", width: "100%", textAlign: "left" }}>
-      <span style={{ flex: 1 }}>
-        {name}
-        <span className="small" style={{ display: "block" }}>{os}</span>
-      </span>
-      <span className="small" style={{ color: on ? "var(--ok)" : "var(--ink-2)", fontWeight: 500 }}>{on ? "✓ On" : "Not on yet"}</span>
-    </div>
-  );
-  const all = p.mic && p.screen && p.control;
-  return (
-    <div className="panel">
-      <div className="drag" data-tauri-drag-region />
-      {progress}
-      <div className="body center">
-        <Back onClick={onBack} />
-        <h1>{all ? "All set. That was the hard part." : "Let Tech Support see, hear and help"}</h1>
-        <div style={{ width: "100%", margin: "8px 0 16px" }}>
-          {row(p.mic, "Hear you", "Microphone")}
-          {row(p.screen, "See your screen", "Screen & System Audio Recording")}
-          {row(p.control, "Click and type for you", "Accessibility")}
-        </div>
-        <div className="grow" />
-        {going && !all ? <p>In the window that opened, flip the switch next to Tech Support.</p> : all ? <p>If your Mac asks once more, press Allow.</p> : null}
-        <button className="btn primary full" autoFocus disabled={all} onClick={turnOn}>{going ? "Try again" : "Turn on"}</button>
-        <p className="small" style={{ margin: "10px 0 0" }}>You'll press Allow once and flip 2 switches. I'll point to them.</p>
-        <button className="link" style={{ fontSize: 14 }} onClick={onDone}>Skip for now</button>
-      </div>
-    </div>
-  );
-}
-
 // ---------- S28 settings (minimal) ----------
 function Settings({ me, onBack, onChange, onSignOut }: { me: Me; onBack: () => void; onChange: (m: Me) => void; onSignOut: () => void }) {
   const set = async (patch: Partial<Me["settings"]>) => {
@@ -869,8 +814,7 @@ function Settings({ me, onBack, onChange, onSignOut }: { me: Me; onBack: () => v
           <h2>Settings</h2>
           <button className="link" onClick={onBack}>Done</button>
         </div>
-        {seg("Talk out loud", "voice", [[true, "On"], [false, "Off"]])}
-        {seg("How fast I talk", "speech", [["slow", "Slower"], ["normal", "Normal"], ["fast", "Faster"]])}
+        {seg("Talk out loud", "voice", [[false, "Off"], [true, "On"]])}
         {seg("Word size", "textSize", [[15, "Small"], [17, "Normal"], [20, "Big"]])}
         {seg("How fast I move", "moveSpeed", [["slow", "Slower"], ["normal", "Normal"]])}
         <div className="grow" />
@@ -890,6 +834,9 @@ const ChatIcon = () => (
 );
 const WrenchIcon = () => (
   <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" aria-hidden="true"><path d="M14.5 4.5a4 4 0 0 0-4.9 5.2L4 15.3 6.7 18l5.6-5.6a4 4 0 0 0 5.2-4.9l-2.4 2.4-2.3-.5-.5-2.3z" strokeLinejoin="round" /></svg>
+);
+const LearnIcon = () => (
+  <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" aria-hidden="true"><path d="M3 8.5 12 4l9 4.5-9 4.5z" strokeLinejoin="round" /><path d="M7 10.5v4.5c0 1.4 2.2 2.5 5 2.5s5-1.1 5-2.5v-4.5M21 8.5V14" strokeLinecap="round" /></svg>
 );
 const MicIcon = () => (
   <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" aria-hidden="true"><rect x="9" y="3" width="6" height="11" rx="3" /><path d="M5 11a7 7 0 0 0 14 0M12 18v3" strokeLinecap="round" /></svg>

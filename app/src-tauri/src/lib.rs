@@ -4,6 +4,7 @@
 // Safety rules that must not depend on the AI's judgment live here too (see `guard_text`).
 mod input;
 mod perms;
+mod quick;
 mod screen;
 
 use serde::Serialize;
@@ -147,6 +148,12 @@ fn urldecode(s: &str) -> String {
     String::from_utf8_lossy(&out).into_owned()
 }
 
+/// Screen recording only takes effect after a relaunch: quit and reopen ourselves (the setup step resumes).
+#[tauri::command]
+fn relaunch(app: AppHandle) {
+    app.restart();
+}
+
 /// Puts the panel just under the menu bar icon (Mac) or just above the tray icon (Windows).
 #[tauri::command]
 fn place_panel(app: AppHandle, width: f64, height: f64) {
@@ -264,10 +271,12 @@ pub fn run() {
             place_panel,
             overlay_mode,
             panel_away,
+            relaunch,
             screen::capture,
             screen::windows_list,
             input::act,
             input::cursor,
+            quick::quick,
             perms::perms_status,
             perms::perms_open,
         ])
