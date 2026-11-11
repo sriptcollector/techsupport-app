@@ -145,7 +145,13 @@ export function Perms({ progress, onDone, onBack, Back }: { progress: React.Reac
       const tryIt = async () => {
         if (stop) return;
         const ok = await capture(undefined, 64).then((c) => c.w > 0).catch(() => false);
-        if (ok) {
+        // The Mac's extra Allow box can still be up after a capture "works": wait until no system
+        // permission box is on screen before calling setup done.
+        const wins = await invoke<{ app: string; title: string }[]>("windows_list").catch(() => []);
+        const owners = wins.map((w) => w.app).join(",");
+        const prompt = wins.some((w) => /UserNotificationCenter|ScreenCapture|replayd|universalAccess|SecurityAgent|coreautha|CoreServicesUIAgent|tccd/i.test(`${w.app} ${w.title}`));
+        apLog(`perm done check ok=${ok} prompt=${prompt} owners=${owners.slice(0, 300)}`);
+        if (ok && !prompt) {
           localStorage.setItem("ts_capture_ok", "1");
           localStorage.removeItem(KEY);
           apLog("perm stage done");

@@ -99,7 +99,7 @@ pub fn windows_list() -> Vec<Win> {
         .filter(|w| w.pid().map(|p| p != me).unwrap_or(true))
         .filter_map(|w| {
             let (x, y, ww, hh) = (w.x().ok()? as f64, w.y().ok()? as f64, w.width().ok()? as f64, w.height().ok()? as f64);
-            if ww < 120.0 || hh < 80.0 {
+            if ww < 60.0 || hh < 40.0 {
                 return None;
             }
             let app = w.app_name().unwrap_or_default();
