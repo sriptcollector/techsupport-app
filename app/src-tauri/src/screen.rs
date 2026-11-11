@@ -26,15 +26,36 @@ pub fn monitor_scale() -> f64 {
     primary().ok().and_then(|m| m.scale_factor().ok()).map(|s| s as f64).unwrap_or(1.0)
 }
 
+/// On a Mac we use Apple's own `screencapture` tool (it goes through ScreenCaptureKit), not the old
+/// window-list API: newer macOS shows an extra "bypass the private window picker" box to apps using
+/// the old API on every capture. Windows uses the normal capture.
+fn grab(m: &Monitor) -> Result<DynamicImage, String> {
+    #[cfg(target_os = "macos")]
+    {
+        let _ = m;
+        let path = std::env::temp_dir().join(format!("ts-shot-{}.png", std::process::id()));
+        let st = std::process::Command::new("/usr/sbin/screencapture").args(["-x", "-m", "-t", "png"]).arg(&path).status().map_err(|e| e.to_string())?;
+        if !st.success() {
+            return Err("screen capture was refused".into());
+        }
+        let img = image::open(&path).map_err(|e| e.to_string());
+        let _ = std::fs::remove_file(&path);
+        return img;
+    }
+    #[cfg(not(target_os = "macos"))]
+    {
+        Ok(DynamicImage::ImageRgba8(m.capture_image().map_err(|e| e.to_string())?))
+    }
+}
+
 /// `region` (logical x, y, w, h) crops to one window; `max` is the longest side in pixels.
 #[tauri::command]
 pub async fn capture(region: Option<(f64, f64, f64, f64)>, max: Option<u32>) -> Result<Shot, String> {
     tauri::async_runtime::spawn_blocking(move || {
         let m = primary()?;
         let scale = m.scale_factor().map_err(|e| e.to_string())? as f64;
-        let img = m.capture_image().map_err(|e| e.to_string())?;
+        let mut img = grab(&m)?;
         let (pw, ph) = (img.width() as f64, img.height() as f64);
-        let mut img = DynamicImage::ImageRgba8(img);
         let (mut sw, mut sh) = (pw / scale, ph / scale);
         if let Some((x, y, w, h)) = region {
             let (cx, cy) = ((x * scale).max(0.0) as u32, (y * scale).max(0.0) as u32);
