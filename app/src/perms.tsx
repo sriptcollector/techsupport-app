@@ -10,7 +10,7 @@ import { getCurrentWindow, LogicalPosition } from "@tauri-apps/api/window";
 import { useEffect, useRef, useState } from "react";
 import { apLog, autopilot, capture, track } from "./api";
 
-type Stage = "intro" | "control" | "screen" | "restart" | "done";
+type Stage = "intro" | "control" | "control_restart" | "screen" | "restart" | "done";
 const KEY = "ts_perm_stage";
 const win = getCurrentWindow();
 
@@ -99,13 +99,14 @@ export function Perms({ progress, onDone, onBack, Back }: { progress: React.Reac
 
   // Move on by itself the moment a switch is on.
   useEffect(() => {
-    if (stage === "control" && p.control) go(p.screen ? "done" : "screen");
+    if ((stage === "control" || stage === "control_restart") && p.control) go(p.screen ? "done" : "screen");
     if ((stage === "screen" || stage === "restart") && p.screen) go("done");
     if (stage === "intro" && p.control && p.screen) go("done");
   }, [p, stage]);
 
   useEffect(() => {
     if (stage === "control") invoke("perms_open", { which: "control" });
+    if (stage === "control_restart" && !p.control) invoke("perms_open", { which: "control" });
     if (stage === "screen") invoke("perms_open", { which: "screen" });
     if (stage === "done") {
       localStorage.removeItem(KEY);
@@ -119,14 +120,16 @@ export function Perms({ progress, onDone, onBack, Back }: { progress: React.Reac
     autopilot().then((ap) => ap && stage === "intro" && setTimeout(() => go(p.control ? "screen" : "control"), 3000));
   }, []);
 
-  // CI only: after the workflow has flipped the screen switch, the scripted person presses "I clicked the switch".
+  // CI only: after the workflow has flipped the switch, the scripted person presses "I clicked the switch".
   useEffect(() => {
-    autopilot().then((ap) => ap && stage === "screen" && setTimeout(relaunch, 20000));
+    autopilot().then((ap) => ap && (stage === "screen" || stage === "control") && setTimeout(() => relaunch(stage === "control" ? "control_restart" : "restart"), 20000));
   }, [stage]);
 
   // Screen recording needs a relaunch. If the switch is on but the Mac hasn't let us see yet, we relaunch.
-  async function relaunch() {
-    localStorage.setItem(KEY, "restart");
+  // Some Macs only count a switch after the app reopens ("restart" in Apple's own box): we reopen ourselves.
+  async function relaunch(next: Stage = "restart") {
+    if (next === "control_restart" && p.control) return go(p.screen ? "done" : "screen");
+    localStorage.setItem(KEY, next);
     apLog("perm relaunch");
     await invoke("relaunch");
   }
@@ -146,8 +149,18 @@ export function Perms({ progress, onDone, onBack, Back }: { progress: React.Reac
         <Picture pane="Accessibility" highlight="switch" />
         <p style={{ margin: "12px 0 0" }}>It's on the System Settings page I just opened. Your Mac may ask for your password or fingerprint. That's the Mac checking it's you.</p>
         <div className="grow" />
-        <p className="small" role="status">{waited > 40 ? "Can't find it? Press the button below and I'll open the page again." : "Waiting for the switch… I'll move on by myself."}</p>
-        <button className="btn full" onClick={() => invoke("perms_open", { which: "control" })}>Open the page again</button>
+        <p className="small" role="status">Waiting for the switch… I'll move on by myself. If your Mac asks to restart Tech Support, press the button below.</p>
+        <button className="btn primary full" onClick={() => relaunch("control_restart")}>I clicked the switch</button>
+        <button className="link" style={{ fontSize: 14 }} onClick={() => invoke("perms_open", { which: "control" })}>Open the page again</button>
+      </>
+    ) : stage === "control_restart" ? (
+      <>
+        <span className="mono">Switch 1 of 2 · Click and type for you</span>
+        <h2 style={{ margin: "8px 0 12px" }}>It isn't on yet</h2>
+        <Picture pane="Accessibility" highlight="switch" />
+        <p style={{ margin: "12px 0 0" }}>The switch next to Tech Support needs to be blue. I opened the page again. Click the switch, then press the button below.</p>
+        <div className="grow" />
+        <button className="btn primary full" onClick={() => relaunch("control_restart")}>I clicked the switch</button>
       </>
     ) : stage === "screen" ? (
       <>
@@ -156,7 +169,7 @@ export function Perms({ progress, onDone, onBack, Back }: { progress: React.Reac
         <Picture pane="Screen & System Audio Recording" highlight="switch" />
         <p style={{ margin: "12px 0 0" }}>Then your Mac will say "Quit &amp; Reopen". Click it. I'll come right back to this spot.</p>
         <div className="grow" />
-        <button className="btn primary full" onClick={relaunch}>I clicked the switch</button>
+        <button className="btn primary full" onClick={() => relaunch()}>I clicked the switch</button>
         <button className="link" style={{ fontSize: 14 }} onClick={() => invoke("perms_open", { which: "screen" })}>Open the page again</button>
       </>
     ) : stage === "restart" ? (
@@ -166,7 +179,7 @@ export function Perms({ progress, onDone, onBack, Back }: { progress: React.Reac
         <Picture pane="Screen & System Audio Recording" highlight="switch" />
         <p style={{ margin: "12px 0 0" }}>The switch next to Tech Support needs to be blue. Click it, then press the button below.</p>
         <div className="grow" />
-        <button className="btn primary full" onClick={relaunch}>I clicked the switch</button>
+        <button className="btn primary full" onClick={() => relaunch()}>I clicked the switch</button>
         <button className="link" style={{ fontSize: 14 }} onClick={() => invoke("perms_open", { which: "screen" })}>Open the page again</button>
       </>
     ) : (
@@ -181,7 +194,7 @@ export function Perms({ progress, onDone, onBack, Back }: { progress: React.Reac
       <div className="drag" data-tauri-drag-region />
       {progress}
       <div className="body center" style={{ textAlign: "left", alignItems: "stretch" }}>
-        <Back onClick={() => (stage === "screen" || stage === "restart" ? go("control") : stage === "control" ? go("intro") : onBack())} />
+        <Back onClick={() => (stage === "screen" || stage === "restart" ? go("control") : stage === "control" || stage === "control_restart" ? go("intro") : onBack())} />
         {body}
       </div>
     </div>
