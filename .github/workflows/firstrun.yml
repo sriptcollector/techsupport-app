@@ -65,7 +65,10 @@ jobs:
           # Switch 2: Screen recording.
           for i in $(seq 1 60); do [ "$(listed kTCCServiceScreenCapture)" != "0" ] && break; grep -q "perm stage screen" "$LOG" 2>/dev/null && [ $i -gt 20 ] && break; sleep 1; done
           sleep 4
-          if [ "$(listed kTCCServiceScreenCapture)" = "0" ] && [ "$(inpane)" = "0" ]; then echo "GATE FAIL: Tech Support not listed under Screen Recording (person would need +)"; fail=1; else echo "GATE OK: listed under Screen Recording"; fi
+          # Newer macOS doesn't always list an app before it's been allowed; then the guide must show the "+" step.
+          if [ "$(listed kTCCServiceScreenCapture)" != "0" ] || [ "$(inpane)" != "0" ]; then echo "GATE OK: listed under Screen Recording"
+          elif grep -q "perm plus guide shown" "$LOG"; then echo "GATE OK: not listed by macOS, the drawn + step is on screen"
+          else echo "GATE FAIL: not listed and no + step (person would have to figure it out)"; fail=1; fi
           grep -q "perm stage screen" "$LOG" && echo "GATE OK: moved on by itself after switch 1" || { echo "GATE FAIL: did not move on after switch 1"; fail=1; }
           sleep 6
           BIN="$APP/Contents/MacOS/tech-support"

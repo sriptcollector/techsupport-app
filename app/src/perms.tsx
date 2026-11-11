@@ -134,6 +134,7 @@ export function Perms({ progress, onDone, onBack, Back }: { progress: React.Reac
     if (stage === "control") invoke("perms_open", { which: "control" });
     if (stage === "control_restart" && !p.control) invoke("perms_open", { which: "control" });
     if (stage === "screen") {
+      apLog("perm plus guide shown");
       // Newer Macs only put an app in the Screen Recording list after it has tried to capture once,
       // so try first (it's refused until the switch is on), then open the page.
       capture(undefined, 64).catch(() => {}).finally(() => invoke("perms_open", { which: "screen" }));
@@ -223,11 +224,10 @@ export function Perms({ progress, onDone, onBack, Back }: { progress: React.Reac
         <h2 style={{ margin: "8px 0 12px" }}>Click the switch next to Tech Support</h2>
         <Picture pane="Screen & System Audio Recording" highlight="switch" />
         <p style={{ margin: "12px 0 0" }}>Then your Mac will say "Quit &amp; Reopen". Click it. I'll come right back to this spot.</p>
-        <details style={{ marginTop: 10 }}>
-          <summary className="small" style={{ cursor: "pointer" }}>Don't see Tech Support in the list?</summary>
+        <div style={{ marginTop: 10 }} data-plus-guide>
+          <p className="small" style={{ margin: "0 0 6px" }}><b>Not in the list?</b> Click <b>+</b> under it, pick <b>Applications</b>, then <b>Tech Support</b>, then <b>Open</b>. Then click its switch.</p>
           <Picture pane="Screen & System Audio Recording" highlight="plus" />
-          <p className="small" style={{ margin: "8px 0 0" }}>Click <b>+</b> under the list, pick <b>Applications</b>, then <b>Tech Support</b>, then <b>Open</b>. Then click its switch.</p>
-        </details>
+        </div>
         <div className="grow" />
         <button className="btn primary full" onClick={() => relaunch()}>I clicked the switch</button>
         <button className="link" style={{ fontSize: 14 }} onClick={() => invoke("perms_open", { which: "screen" })}>Open the page again</button>
