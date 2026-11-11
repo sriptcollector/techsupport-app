@@ -137,7 +137,7 @@ pub async fn quick(action: String, arg: Option<String>) -> Result<String, String
                     run("netsh", &["interface", "set", "interface", "Wi-Fi", "enabled"]).map(|_| "Wi-Fi turned on".into())
                 }
             }
-            _ => Err("unknown quick action".into()),
+            _ => crate::extra::extra(&action, &arg).unwrap_or_else(|| Err("unknown quick action".into())),
         }
     })
     .await
