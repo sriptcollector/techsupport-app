@@ -6,3 +6,4 @@ shots/
 *.log
 app/src-tauri/gen/
 release-out/
+*.tsbuildinfo
