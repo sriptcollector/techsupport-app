@@ -180,7 +180,10 @@ fn panel_front(app: AppHandle, focus: bool) {
     }
     let _ = w.unminimize();
     let _ = w.set_always_on_top(true);
+    // Follow the person to whatever desktop (Space) or full-screen app they are in.
+    let _ = w.set_visible_on_all_workspaces(true);
     let _ = w.show();
+    eprintln!("[panel] front focus={focus} visible_after={:?}", w.is_visible());
     if focus {
         let _ = w.set_focus();
     }
@@ -207,6 +210,7 @@ fn mac_front(app: &AppHandle, w: &WebviewWindow, focus: bool) {
             let win: &NSWindow = unsafe { &*(ptr as *const NSWindow) };
             #[allow(unused_unsafe)]
             unsafe {
+                win.setLevel(25); // NSStatusWindowLevel: above normal and floating windows, like a menu bar panel
                 win.orderFrontRegardless();
                 if focus {
                     win.makeKeyAndOrderFront(None);
@@ -285,12 +289,23 @@ fn protect(_w: &WebviewWindow) {
 
 fn toggle_panel(app: &AppHandle) {
     if let Some(w) = app.get_webview_window("panel") {
-        if w.is_visible().unwrap_or(false) {
+        let visible = w.is_visible().unwrap_or(false);
+        eprintln!("[panel] toggle visible={visible}");
+        if visible {
             let _ = app.emit_to("panel", "panel-toggle", false);
         } else {
+            // Show it natively first: the webview may be asleep while the app is hidden (Mac test 2026-11-12),
+            // so the page only picks the view and size afterwards.
+            panel_front(app.clone(), true);
             let _ = app.emit_to("panel", "panel-toggle", true);
         }
     }
+}
+
+/// The keyboard shortcut and the menu bar icon do the same thing.
+#[tauri::command]
+fn panel_toggle(app: AppHandle) {
+    toggle_panel(&app);
 }
 
 #[cfg(windows)]
@@ -348,6 +363,7 @@ pub fn run() {
             perms::perms_status,
             perms::perms_open,
             panel_front,
+            panel_toggle,
         ])
         .setup(|app| {
             #[cfg(target_os = "macos")]
