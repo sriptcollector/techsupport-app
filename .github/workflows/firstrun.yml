@@ -92,14 +92,32 @@ jobs:
           grep -E "DONE worked=true" "$LOG" && echo "GATE OK: first help worked" || { echo "GATE FAIL: first help didn't finish"; fail=1; }
           # Regression (Mac test 2026-11-12): after the panel hides on focus loss, the menu bar icon must bring it back.
           PID=$(pgrep -f "Tech Support.app/Contents/MacOS" | head -1)
-          onscreen() { swift - "$PID" <<'SWIFT' 2>/dev/null || echo 0
+          onscreen() { swift - "$PID" <<'SWIFT' || echo 0
           import CoreGraphics
           let pid = Int(CommandLine.arguments[1]) ?? -1
           let l = CGWindowListCopyWindowInfo([.optionOnScreenOnly, .excludeDesktopElements], kCGNullWindowID) as? [[String: Any]] ?? []
           print(l.filter { ($0[kCGWindowOwnerPID as String] as? Int) == pid && (($0[kCGWindowBounds as String] as? [String: Any])?["Height"] as? Double ?? 0) > 200 }.count)
           SWIFT
           }
-          clicktray() { osascript -e 'tell application "System Events" to tell (first process whose unix id is '"$PID"') to click menu bar item 1 of menu bar 2' 2>&1 | tail -1; }
+          clicktray() {
+          # A real mouse click on the menu bar icon, like a person's. (System Events' "click" is an accessibility press, which the
+          # status item does not treat as a mouse click, so it never reached the app.)
+          GEOM=$(osascript -e 'tell application "System Events" to tell (first process whose unix id is '"$PID"') to get {position, size} of menu bar item 1 of menu bar 2' 2>&1 | tr -d ' ')
+          echo "tray icon geometry: $GEOM"
+          swift - "$GEOM" <<'SWIFT'
+          import CoreGraphics
+          import Foundation
+          let n = CommandLine.arguments[1].split(separator: ",").compactMap { Double($0) }
+          if n.count == 4 {
+            let p = CGPoint(x: n[0] + n[2] / 2, y: n[1] + n[3] / 2)
+            for t in [CGEventType.mouseMoved, .leftMouseDown, .leftMouseUp] {
+              let e = CGEvent(mouseEventSource: nil, mouseType: t, mouseCursorPosition: p, mouseButton: .left)
+              e?.post(tap: .cghidEventTap)
+              Thread.sleep(forTimeInterval: 0.15)
+            }
+          } else { print("no icon geometry") }
+          SWIFT
+          }
           [ "$(onscreen)" = "0" ] && { clicktray; sleep 3; }
           [ "$(onscreen)" != "0" ] && echo "tray open 1: panel on screen" || echo "tray open 1: panel not on screen"
           open -a TextEdit; sleep 3   # focus moves away: the panel hides itself
