@@ -258,8 +258,12 @@ mod tests {
     #[cfg(windows)]
     #[test]
     fn windows_scripts_run_through_the_encoded_path() {
-        let v = extra("volume", "status").unwrap().unwrap();
-        assert!(v.starts_with("Volume is"), "{v}");
+        // CI runners can have no audio device ("Element not found", 0x80070490): the script still ran
+        // through the encoded path, which is what this test checks.
+        match extra("volume", "status").unwrap() {
+            Ok(v) => assert!(v.starts_with("Volume is"), "{v}"),
+            Err(e) => assert!(e.contains("Element not found") || e.contains("80070490"), "{e}"),
+        }
         let n = extra("network_check", "").unwrap().unwrap();
         assert!(n.contains("Name cache cleared"), "{n}");
         assert!(extra("volume", "loud").unwrap().is_err());
