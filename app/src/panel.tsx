@@ -141,11 +141,10 @@ export function Panel() {
     });
     const un = [
       listen<boolean>("panel-toggle", async (e) => {
-        // A click on the menu bar icon first takes focus away, which already hid the panel: that click meant "close".
-        if (e.payload && Date.now() - blurHidAt.current < 400) return;
-        if (!e.payload || (await win.isVisible())) {
-          if (viewRef.current === "home" || viewRef.current === "settings") return win.hide();
-          if (!e.payload) return;
+        // false = close (the native side saw it on screen); true = the native side already put it in front.
+        if (!e.payload) {
+          if (viewRef.current === "home" || viewRef.current === "settings") win.hide();
+          return;
         }
         if (viewRef.current === "loading" || viewRef.current === "home" || viewRef.current === "settings") route(true);
         else show(viewRef.current);
@@ -161,7 +160,7 @@ export function Panel() {
       }),
       listen<{ region: [number, number, number, number]; app: string; pins: any[]; strokes: [number, number][][] }>("ov:bugdone", (e) => startFix(e.payload)),
     ];
-    getEnv().then((env) => register(env.os === "mac" ? "Control+Alt+T" : "Control+Alt+T", (e) => e.state === "Pressed" && emitTo("panel", "panel-toggle", true)).catch(() => {}));
+    getEnv().then((env) => register(env.os === "mac" ? "Control+Alt+T" : "Control+Alt+T", (e) => e.state === "Pressed" && invoke("panel_toggle")).catch(() => {}));
     const blur = win.onFocusChanged(({ payload }) => {
       if (!payload && viewRef.current === "home") {
         blurHidAt.current = Date.now();
