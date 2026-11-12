@@ -16,7 +16,7 @@ export type Me = {
   canUse: boolean;
   why: "no_plan" | "trial_used" | "month_used" | null;
   usage: { sessions: number; limit: number };
-  settings: { speech: "slow" | "normal" | "fast"; voice: boolean; textSize: number; moveSpeed: "slow" | "normal"; talkLess: boolean };
+  settings: { speech: "slow" | "normal" | "fast"; voice: boolean; textSize: number; moveSpeed: "slow" | "normal"; talkLess: boolean; comfort: "" | "quick" | "gentle" };
   test: boolean;
 };
 
@@ -58,6 +58,34 @@ export async function api<T = any>(path: string, body?: unknown, init: RequestIn
   const d = await r.json().catch(() => ({}));
   if (!r.ok) throw new ApiError(r.status, d.error ?? "error");
   return d as T;
+}
+
+// The first reply, streamed in about a second while the helper looks at the screen.
+export async function ack(text: string, comfort: string, os: string, onText: (all: string) => void) {
+  const r = await fetch((await server()) + "/api/ack", {
+    method: "POST",
+    headers: { "content-type": "application/json", ...(token ? { authorization: `Bearer ${token}` } : {}) },
+    body: JSON.stringify({ text, comfort, os }),
+  }).catch(() => null);
+  if (!r?.ok || !r.body) return "";
+  const rd = r.body.getReader(), dec = new TextDecoder();
+  let buf = "", all = "";
+  for (;;) {
+    const { value, done } = await rd.read();
+    if (done) break;
+    buf += dec.decode(value, { stream: true });
+    const parts = buf.split("\n\n");
+    buf = parts.pop() ?? "";
+    for (const p of parts) {
+      const d = p.replace(/^data: /, "");
+      if (d === "[DONE]") return all;
+      try {
+        all += JSON.parse(d).t ?? "";
+        onText(all);
+      } catch {}
+    }
+  }
+  return all;
 }
 
 // ---------- analytics (Conversion rulebook event schema) ----------
