@@ -112,10 +112,7 @@ async fn google_signin(app: AppHandle, server: String) -> Result<String, String>
             if path.starts_with("/signed-in") && get("state").as_deref() == Some(state.as_str()) {
                 if let Some(token) = get("token") {
                     let _ = write!(s, "HTTP/1.1 302 Found\r\nLocation: {done_page}\r\nContent-Length: 0\r\nConnection: close\r\n\r\n");
-                    if let Some(w) = app.get_webview_window("panel") {
-                        let _ = w.show();
-                        let _ = w.set_focus();
-                    }
+                    panel_front(app.clone(), true);
                     return Ok(token);
                 }
             }
@@ -169,6 +166,54 @@ fn walk_focus(app: AppHandle, walking: bool) {
             }
         }
     }
+}
+
+/// Brings the panel to the front. On a Mac the app is a menu bar app (Accessory) and `walk_focus` may
+/// have hidden the whole app, so showing the window alone left it invisible and the menu bar icon
+/// "did nothing" (Mac test, 2026-11-12). Unhide and activate the app first, then order the panel front.
+#[tauri::command]
+fn panel_front(app: AppHandle, focus: bool) {
+    let Some(w) = app.get_webview_window("panel") else { return };
+    #[cfg(target_os = "macos")]
+    {
+        let _ = app.show();
+    }
+    let _ = w.unminimize();
+    let _ = w.set_always_on_top(true);
+    let _ = w.show();
+    if focus {
+        let _ = w.set_focus();
+    }
+    #[cfg(target_os = "macos")]
+    mac_front(&app, &w, focus);
+}
+
+#[cfg(target_os = "macos")]
+fn mac_front(app: &AppHandle, w: &WebviewWindow, focus: bool) {
+    let w = w.clone();
+    let _ = app.run_on_main_thread(move || {
+        use objc2::MainThreadMarker;
+        use objc2_app_kit::{NSApplication, NSWindow};
+        let Some(mtm) = MainThreadMarker::new() else { return };
+        let ns = NSApplication::sharedApplication(mtm);
+        #[allow(deprecated, unused_unsafe)]
+        unsafe {
+            ns.unhide(None);
+            if focus {
+                ns.activateIgnoringOtherApps(true);
+            }
+        }
+        if let Ok(ptr) = w.ns_window() {
+            let win: &NSWindow = unsafe { &*(ptr as *const NSWindow) };
+            #[allow(unused_unsafe)]
+            unsafe {
+                win.orderFrontRegardless();
+                if focus {
+                    win.makeKeyAndOrderFront(None);
+                }
+            }
+        }
+    });
 }
 
 /// Screen recording only takes effect after a relaunch: quit and reopen ourselves (the setup step resumes).
@@ -302,6 +347,7 @@ pub fn run() {
             quick::quick,
             perms::perms_status,
             perms::perms_open,
+            panel_front,
         ])
         .setup(|app| {
             #[cfg(target_os = "macos")]
