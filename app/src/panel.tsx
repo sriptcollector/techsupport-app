@@ -8,15 +8,16 @@ import { register, unregister } from "@tauri-apps/plugin-global-shortcut";
 import { invoke } from "@tauri-apps/api/core";
 import { useEffect, useRef, useState } from "react";
 import { Session, type Pick } from "./agent";
-import { apLog, api, ApiError, autopilot, capture, getEnv, hush, loadToken, overlayMode, placePanel, server, setToken, setUser, speak, track, type Me } from "./api";
+import { ack, apLog, api, ApiError, autopilot, capture, getEnv, hush, loadToken, overlayMode, placePanel, server, setToken, setUser, speak, track, type Me } from "./api";
 import { Bars, Bot } from "./bot";
 import { Mic, saidStop, saidThatsAll } from "./voice";
 import { Perms } from "./perms";
 
-type View = "loading" | "welcome" | "signin" | "trial" | "perms" | "home" | "chat" | "pill" | "bug" | "settings";
+// Chat first (Orion, 2026-11-11): "home" is the chat with nothing asked yet; "chat" is a running conversation.
+type View = "loading" | "welcome" | "signin" | "trial" | "comfort" | "perms" | "home" | "chat" | "pill" | "bug" | "settings";
 type Line = { who: "bot" | "me"; text: string; pin?: number | null };
 type Card =
-  | { kind: "plan"; understood: string; steps: string[]; fix: boolean }
+  | { kind: "plan"; understood: string; steps: string[]; fix: boolean; wait: boolean }
   | { kind: "ask"; question: string; options: string[] }
   | { kind: "done"; outcome: string; worked: boolean; steps: string[] }
   | { kind: "stopped" }
@@ -24,7 +25,10 @@ type Card =
   | null;
 
 const win = getCurrentWindow();
-const SIZES: Partial<Record<View, [number, number]>> = { home: [380, 424], chat: [380, 540], bug: [380, 460], pill: [380, 64], settings: [380, 520] };
+const SIZES: Partial<Record<View, [number, number]>> = { home: [400, 560], chat: [400, 560], bug: [380, 460], pill: [380, 64], settings: [380, 560] };
+// Gentle mode: bigger words need a bigger window.
+const GENTLE_SIZE: [number, number] = [440, 640];
+const gentleOf = (m: Me | null) => (m?.settings.comfort ?? "") !== "quick";
 const SHOW_ME = `Switch to "Show me, I'll click": point with mouse_move and use needs_you; don't click.`;
 function textScale() {
   const el = document.createElement("span");
@@ -65,8 +69,9 @@ export function Panel() {
   // ---------- window size and placement ----------
   async function show(v: View) {
     setView(v);
+    viewRef.current = v; // at once, so start-up code never mistakes a chosen view for "loading"
     document.body.dataset.busy = v === "pill" || v === "bug" || v === "chat" ? "1" : "0";
-    const base = SIZES[v] ?? [560, 640];
+    const base = (v === "home" || v === "chat") && gentleOf(meRef.current) ? GENTLE_SIZE : SIZES[v] ?? [560, 640];
     await (SIZES[v] ? placePanel(base[0], base[1]) : win.setSize(new LogicalSize(base[0], base[1])));
     // Big system text (Windows "Text size", Mac larger text) makes everything bigger than our fixed
     // window: either the fonts grow or the whole page zooms. Measure it and grow the window to match,
@@ -121,13 +126,15 @@ export function Panel() {
     setUser(m.email);
     emitTo("overlay", "ov:settings", { textSize: m.settings.textSize });
     if (!m.canUse && m.why === "no_plan") return show("trial");
+    // One setup question: how comfortable are you with tech? (sets Quick or Gentle; changeable any time)
+    if (!m.settings.comfort) return show("comfort");
     if (env.os === "mac") {
       const p = await invoke<{ screen: boolean; control: boolean }>("perms_status");
       if (!p.screen || !p.control || !localStorage.getItem("ts_capture_ok")) return show("perms");
     }
     if (firstRun.current || openAfter) {
       firstRun.current = false;
-      return show("home");
+      return goHome();
     }
   }
 
@@ -184,18 +191,54 @@ export function Panel() {
 
   // ---------- "I don't know how to do something" ----------
   const learning = useRef(false);
+  // The chat with nothing asked yet (the greeting is drawn when there are no lines).
+  function goHome() {
+    micOff();
+    session.current?.end();
+    session.current = null;
+    learning.current = false;
+    waiter.current = null;
+    setLines([]);
+    setCard(null);
+    setDraft("");
+    return show("home");
+  }
   function startHow(prefill?: string, learn = false) {
     track("cta_click", { cta: learn ? "learn" : "how" });
     if (!meRef.current?.canUse) return blocked();
     learning.current = learn;
-    setLines([{ who: "bot", text: learn ? "What do you want to learn?" : "What are you trying to do?" }]);
+    setLines(learn ? [{ who: "bot", text: "What do you want to learn?" }] : []);
     setCard(null);
     setDraft("");
     session.current = null;
-    show("chat");
-    speak("What are you trying to do?", meRef.current?.settings);
+    show(learn ? "chat" : "home");
     if (prefill) return heard(prefill);
-    ensureMic(heard);
+  }
+  // Quick or Gentle, switchable any time from the chat header.
+  async function setComfort(c: "quick" | "gentle") {
+    const m = meRef.current;
+    if (!m || m.settings.comfort === c) return;
+    setMe({ ...m, settings: { ...m.settings, comfort: c } });
+    track("comfort_set", { comfort: c, where: "chat" });
+    const r = await api<Me>("/api/settings", { comfort: c }).catch(() => null);
+    if (r) setMe(r);
+    if (viewRef.current === "home" || viewRef.current === "chat") show(viewRef.current);
+  }
+  // The first reply streams in about a second while the helper looks at the screen.
+  function quickReply(t: string) {
+    const m = meRef.current;
+    let at = -1;
+    ack(t, m?.settings.comfort || "gentle", os, (all) =>
+      setLines((l) => {
+        if (at < 0) {
+          at = l.length;
+          return [...l, { who: "bot", text: all }];
+        }
+        const c = l.slice();
+        c[at] = { ...c[at], text: all };
+        return c;
+      }),
+    ).catch(() => {});
   }
   function heard(text: string) {
     const t = text.trim();
@@ -210,6 +253,11 @@ export function Panel() {
       const w = waiter.current;
       waiter.current = null;
       return w(t);
+    }
+    if (!s) {
+      if (!meRef.current?.canUse) return blocked();
+      if (viewRef.current === "home") show("chat");
+      quickReply(t);
     }
     if (!s) return begin("how", learning.current ? `They want to learn how: "${t}". Teach them: for each step point at the spot (mouse_move) and let them click it themselves (needs_you), with one short line on why.` : `They said: "${t}"`);
     setThinking(true);
@@ -232,11 +280,27 @@ export function Panel() {
   const ui = {
     settings: () => meRef.current!.settings,
     plan: async (understood: string, steps: string[]) => {
-      // The helper does the work; the plan is shown and it starts right away (least decisions).
+      // Quick: the plan shows and it starts right away. Gentle: nothing changes until they say Yes.
+      const wait = gentleOf(meRef.current);
       say("bot", understood);
-      setCard({ kind: "plan", understood, steps, fix: session.current?.mode === "fix" });
-      speak(understood, meRef.current?.settings);
-      return "do" as Pick;
+      setCard({ kind: "plan", understood, steps, fix: session.current?.mode === "fix", wait });
+      speak(wait ? `${understood} Shall I?` : understood, meRef.current?.settings);
+      if (!wait) return "do" as Pick;
+      show("chat");
+      return new Promise<Pick | string>((resolve) => {
+        pickRef.current = (p) => {
+          pickRef.current = () => {};
+          setCard(null);
+          if (p === "steps") say("bot", "Okay. I didn't change anything.");
+          resolve(p);
+        };
+        // Words typed or said while the card is up count as their answer.
+        waiter.current = (t) => {
+          pickRef.current = () => {};
+          setCard(null);
+          resolve(t);
+        };
+      }) as Promise<Pick>;
     },
     ask: (question: string, options: string[]) =>
       new Promise<string>((resolve) => {
@@ -411,6 +475,7 @@ export function Panel() {
         setTimeout(() => emitTo("overlay", "ov:finish-bug", {}), 4000);
       });
       if (card?.kind === "plan" && kind === "showme") once("showme", 500, () => session.current?.showMe());
+      if (card?.kind === "plan" && card.wait) once("yes", 2500, () => pickRef.current(kind === "showme" ? "show" : "do"));
       if (card?.kind === "ask") once(`ask${lines.length}`, 3000, () => heard(card.options[0]));
       if (card?.kind === "done") {
         apLog(`DONE worked=${card.worked} outcome=${card.outcome}`);
@@ -447,43 +512,21 @@ export function Panel() {
   if (view === "signin")
     return <SignIn progress={progressBar(1)} who={me?.email ?? null} onBack={() => setView("welcome")} onSignOut={async () => (await setToken(null), setMe(null))} onDone={() => (track("sign_up"), route(true))} />;
   if (view === "trial") return <Trial progress={progressBar(2)} me={me} onBack={() => setView("signin")} onDone={() => route(true)} />;
-  if (view === "perms") return <Perms progress={progressBar(3)} Back={Back} onBack={() => setView(me?.canUse ? "signin" : "trial")} onDone={() => show("home")} />;
-  if (view === "settings") return <Settings me={me!} onBack={() => show("home")} onChange={setMe} onSignOut={async () => (await setToken(null), setMe(null), show("signin"))} />;
-
-  if (view === "home")
+  if (view === "comfort")
     return (
-      <div className="panel">
-        <div className="body" style={{ paddingTop: 18, gap: 10 }}>
-          <div className="row" style={{ gap: 12, marginBottom: 6 }}>
-            <Bot expr="idle" size={32} />
-            <h2>What do you need?</h2>
-          </div>
-          <button className="big tone-how" autoFocus onClick={() => startHow()}>
-            <ChatIcon />
-            I don't know how to do something
-          </button>
-          <button className="big tone-fix" onClick={startBug}>
-            <WrenchIcon />
-            Something is broken
-          </button>
-          <button className="big tone-learn" onClick={() => startHow(undefined, true)}>
-            <LearnIcon />
-            Learn something
-          </button>
-          <hr style={{ border: 0, borderTop: "1px solid var(--hair)", margin: "6px 0", width: "100%" }} />
-          <button className="big" onClick={() => (win.hide(), emitTo("report", "report-open", {}))}>
-            <span>
-              Report a bug
-              <span className="sub">Tell us what's wrong with Tech Support</span>
-            </span>
-          </button>
-          <div className="row" style={{ justifyContent: "space-between" }}>
-            <span className="small">{me?.plan === "trialing" && me.trialEnds ? `Free until ${new Date(me.trialEnds).toLocaleDateString(undefined, { month: "long", day: "numeric" })}` : ""}</span>
-            <button className="link" style={{ fontSize: 14 }} onClick={() => show("settings")}>Settings</button>
-          </div>
-        </div>
-      </div>
+      <Comfort
+        progress={progressBar(3)}
+        onBack={() => setView("signin")}
+        onPick={async (c) => {
+          track("comfort_set", { comfort: c, where: "setup" });
+          const r = await api<Me>("/api/settings", { comfort: c }).catch(() => null);
+          if (r) setMe(r);
+          route(true);
+        }}
+      />
     );
+  if (view === "perms") return <Perms progress={progressBar(4)} Back={Back} onBack={() => setView("comfort")} onDone={() => goHome()} />;
+  if (view === "settings") return <Settings me={me!} onBack={() => goHome()} onChange={setMe} onComfort={setComfort} onSignOut={async () => (await setToken(null), setMe(null), show("signin"))} />;
 
   if (view === "pill")
     return (
@@ -500,38 +543,72 @@ export function Panel() {
       </div>
     );
 
-  // chat and bug views
+  // the chat (home = nothing asked yet) and the bug view
   const plan = card?.kind === "plan" ? card : null;
+  const gentle = gentleOf(me);
+  const fresh = view === "home" && lines.length === 0 && !session.current;
+  const secs = (n: number) => (n * 13 < 50 ? `About ${Math.ceil((n * 13) / 10) * 10} seconds.` : n * 13 < 90 ? "About a minute." : `About ${Math.round((n * 13) / 60)} minutes.`);
   return (
-    <div className="panel">
-      <div className="drag row" data-tauri-drag-region style={{ justifyContent: "flex-end", padding: "4px 8px 0" }}>
-        <button className="link" style={{ fontSize: 14, padding: 4 }} onClick={() => (micOff(), hush(), session.current?.end(), overlayMode(false), emitTo("overlay", "ov:mode", { mode: "off" }), show("home"))}>← Back</button>
-      </div>
-      <div className="body" style={{ paddingTop: 0 }}>
+    <div className={`panel ${gentle ? "gentle" : "quick"}`}>
+      <header className="chat-head" data-tauri-drag-region>
+        <div className="row" data-tauri-drag-region style={{ gap: 10 }}>
+          <Bot expr="idle" size={28} />
+          <strong data-tauri-drag-region>Tech Support</strong>
+        </div>
+        <div className="row" style={{ gap: 4 }}>
+          {view !== "bug" && (
+            <div className="seg" role="radiogroup" aria-label="How I talk">
+              <button role="radio" aria-checked={!gentle} onClick={() => setComfort("quick")}>Quick</button>
+              <button role="radio" aria-checked={gentle} onClick={() => setComfort("gentle")}>Gentle</button>
+            </div>
+          )}
+          {view !== "home" && (
+            <button className="icon-btn" aria-label="New question" title="New question" onClick={() => (hush(), overlayMode(false), emitTo("overlay", "ov:mode", { mode: "off" }), goHome())}><PlusIcon /></button>
+          )}
+          <button className="icon-btn" aria-label="Settings" title="Settings" onClick={() => (micOff(), show("settings"))}><GearIcon /></button>
+        </div>
+      </header>
+      <div className="body" style={{ paddingTop: 12 }}>
         <div className="chat" aria-live="polite">
+          {fresh && (
+            <>
+              <p className="greet">{gentle ? "Hi. What do you need help with today?" : "What's wrong?"}</p>
+              <div className="chips" aria-label="Try one of these">
+                {SUGGEST.map((s, i) => (
+                  <button key={s} className={`chip${i === 0 ? " rec" : ""}`} onClick={() => (micOff(), heard(s))}>
+                    {s}
+                    {i === 0 && <span className="tag">Recommended</span>}
+                  </button>
+                ))}
+                <button className="chip" onClick={startBug}>Something is broken: I'll show you</button>
+                <button className="chip" onClick={() => startHow(undefined, true)}>Teach me something</button>
+              </div>
+            </>
+          )}
           {lines.map((l, i) => (
             <div key={i} className={`msg ${l.who === "bot" ? "helper" : "me"}`}>
               {l.pin ? <span className="pin">{l.pin}</span> : null}
               {l.text}
             </div>
           ))}
-          {view === "chat" && lines.length === 1 && !session.current && (
-            <div className="chips" aria-label="Try one of these">
-              {SUGGEST.map((s, i) => (
-                <button key={s} className={`chip${i === 0 ? " rec" : ""}`} onClick={() => (micOff(), heard(s))}>
-                  {s}
-                  {i === 0 && <span className="tag">Recommended</span>}
-                </button>
-              ))}
+          {thinking && !card && <div className="msg helper small">Looking at your screen…</div>}
+          {plan && plan.wait && (
+            <div className="plan">
+              {plan.steps.length > 0 && <span className="mono">{plan.steps.length === 1 ? "1 step" : `${plan.steps.length} steps`} · {secs(plan.steps.length)}</span>}
+              <ol>{plan.steps.map((s, i) => <li key={i}>{s}</li>)}</ol>
+              <p style={{ margin: "10px 0 0" }}>Shall I do it?</p>
+              <div className="row" style={{ marginTop: 10 }}>
+                <button className="btn primary" autoFocus onClick={() => pickRef.current("do")}>Yes, do it</button>
+                <button className="btn" onClick={() => pickRef.current("steps")}>Not now</button>
+              </div>
+              <button className="link" style={{ fontSize: 15, padding: "10px 0 0" }} onClick={() => pickRef.current("show")}>Show me, I'll click it myself</button>
+              <p className="small" style={{ margin: "10px 0 0" }}>Press Stop or move your mouse and I stop at once. I never touch passwords or bank pages.</p>
             </div>
           )}
-          {thinking && !card && <div className="msg helper small">Looking at your screen…</div>}
-          {plan && (
-            <div className="plan">
+          {plan && !plan.wait && (
+            <div className="plan log">
               <ol>{plan.steps.map((s, i) => <li key={i}>{s}</li>)}</ol>
               <button className="link" style={{ fontSize: 14, padding: "8px 0 0" }} onClick={() => session.current?.showMe()}>Let me do it myself</button>
-              <p className="small" style={{ margin: "10px 0 0" }}>Nothing happens until you choose. Press Stop or move your mouse and I stop at once. I never touch passwords or bank pages.</p>
-              {plan.steps.length <= 10 && <p className="small" style={{ margin: "6px 0 0" }}>{plan.steps.length * 13 < 50 ? `About ${Math.ceil((plan.steps.length * 13) / 10) * 10} seconds.` : plan.steps.length * 13 < 90 ? "About a minute." : `About ${Math.round((plan.steps.length * 13) / 60)} minutes.`}</p>}
             </div>
           )}
           {card?.kind === "ask" && (
@@ -558,7 +635,7 @@ export function Panel() {
                 <div className="chips" style={{ marginTop: 12 }}>
                   <button className="chip rec" autoFocus onClick={() => (setCard(null), session.current?.more("Try again a different way. Take a screenshot first."))}>Try again<span className="tag">Recommended</span></button>
                   <button className="chip" onClick={() => (setCard(null), session.current?.more(SHOW_ME))}>Show me, I'll click</button>
-                  <button className="chip" onClick={() => (setCard(null), overlayMode(false), show("home"))}>I'm done</button>
+                  <button className="chip" onClick={() => (setCard(null), overlayMode(false), goHome())}>I'm done</button>
                 </div>
               ) : (
               <div className="chips" style={{ marginTop: 12 }}>
@@ -575,7 +652,7 @@ export function Panel() {
               <div className="chips" style={{ marginTop: 12 }}>
                 <button className="chip rec" autoFocus onClick={() => (setCard(null), overlayMode(false), session.current?.more("Keep going from where things are now. Take a screenshot first."))}>Keep going<span className="tag">Recommended</span></button>
                 <button className="chip" onClick={() => (setCard(null), session.current?.more(session.current.undoPrompt()))}>Undo what you did</button>
-                <button className="chip" onClick={() => (setCard(null), overlayMode(false), session.current?.end(), show("home"))}>I'm done</button>
+                <button className="chip" onClick={() => (setCard(null), overlayMode(false), session.current?.end(), goHome())}>I'm done</button>
               </div>
             </div>
           )}
@@ -590,13 +667,19 @@ export function Panel() {
             </div>
           )}
         </div>
-        <div className="listening" aria-live="polite">
-          {micOn ? <><Bars level={level} />{hearing ? "Listening…" : view === "bug" ? 'Say "that\'s all" when you\'re done' : "Listening…"}</> : <span>{view === "bug" ? "" : "The mic is off."}</span>}
-        </div>
+        {micOn && (
+          <div className="listening" aria-live="polite">
+            <Bars level={level} />
+            {hearing || view !== "bug" ? "Listening…" : 'Say "that\'s all" when you\'re done'}
+          </div>
+        )}
         <form className="composer" onSubmit={(e) => (e.preventDefault(), send())}>
-          <input value={draft} onChange={(e) => onType(e.target.value)} placeholder="Or type here" aria-label="Type what you need" />
-          <button type="button" className={`mic${micOn ? " on" : ""}`} aria-pressed={micOn} aria-label={micOn ? "Turn the mic off" : "Turn the mic on"} onClick={() => (micOn ? micOff() : ensureMic(view === "bug" ? (t) => emitTo("overlay", "ov:words", { text: t, at: Date.now() }) : heard))}>
+          <input value={draft} autoFocus={view === "home"} onChange={(e) => onType(e.target.value)} placeholder="Type or talk…" aria-label="Say what you need" />
+          <button type="button" className={`mic${micOn ? " on" : ""}`} aria-pressed={micOn} aria-label={micOn ? "Turn the mic off" : "Talk instead of typing"} onClick={() => (micOn ? micOff() : ensureMic(view === "bug" ? (t) => emitTo("overlay", "ov:words", { text: t, at: Date.now() }) : heard))}>
             <MicIcon />
+          </button>
+          <button type="submit" className="send" aria-label="Send" disabled={!draft.trim()}>
+            <SendIcon />
           </button>
         </form>
       </div>
@@ -800,8 +883,41 @@ function Trial({ progress, me, onDone, onBack }: { progress: React.ReactNode; me
   );
 }
 
+// ---------- setup: one question (no age question; "I get by" starts Gentle) ----------
+const COMFORT: { c: "quick" | "gentle"; title: string; sub: string; rec?: boolean }[] = [
+  { c: "quick", title: "Very comfortable", sub: "Keep it short. Just fix it." },
+  { c: "gentle", title: "I get by", sub: "Explain as you go. Ask before changes.", rec: true },
+  { c: "gentle", title: "Not very", sub: "Go slow, big words, one step at a time." },
+];
+function Comfort({ progress, onBack, onPick }: { progress: React.ReactNode; onBack: () => void; onPick: (c: "quick" | "gentle") => void }) {
+  const [busy, setBusy] = useState(false);
+  useEffect(() => {
+    autopilot().then((ap) => ap && setTimeout(() => onPick(ap.startsWith("quick") ? "quick" : "gentle"), 3000));
+  }, []);
+  return (
+    <div className="panel">
+      <div className="drag" data-tauri-drag-region />
+      {progress}
+      <div className="body" style={{ overflowY: "auto" }}>
+        <Back onClick={onBack} />
+        <Bot expr="idle" size={56} />
+        <h1 style={{ textAlign: "left" }}>How comfortable are you with tech?</h1>
+        <p className="small" style={{ margin: "0 0 14px", maxWidth: "none" }}>So I talk the right way. You can change this any time.</p>
+        <div className="stack" role="radiogroup" aria-label="How comfortable are you with tech?">
+          {COMFORT.map((o) => (
+            <button key={o.title} role="radio" aria-checked={false} disabled={busy} autoFocus={!!o.rec} className={`choice${o.rec ? " rec" : ""}`} onClick={() => (setBusy(true), onPick(o.c))}>
+              <span className="t">{o.title}{o.rec && <span className="tag">Recommended</span>}</span>
+              <span className="s">{o.sub}</span>
+            </button>
+          ))}
+        </div>
+      </div>
+    </div>
+  );
+}
+
 // ---------- S28 settings (minimal) ----------
-function Settings({ me, onBack, onChange, onSignOut }: { me: Me; onBack: () => void; onChange: (m: Me) => void; onSignOut: () => void }) {
+function Settings({ me, onBack, onChange, onComfort, onSignOut }: { me: Me; onBack: () => void; onChange: (m: Me) => void; onComfort: (c: "quick" | "gentle") => void; onSignOut: () => void }) {
   const set = async (patch: Partial<Me["settings"]>) => {
     const m = await api<Me>("/api/settings", patch).catch(() => null);
     if (m) {
@@ -826,11 +942,24 @@ function Settings({ me, onBack, onChange, onSignOut }: { me: Me; onBack: () => v
           <h2>Settings</h2>
           <button className="link" onClick={onBack}>Done</button>
         </div>
+        <div className="stack" style={{ gap: 6 }}>
+          <span className="small">How I talk</span>
+          <div className="row" role="radiogroup" aria-label="How I talk">
+            {(["quick", "gentle"] as const).map((c) => {
+              const on = (me.settings.comfort || "gentle") === c;
+              return <button key={c} role="radio" aria-checked={on} className={`btn${on ? " primary" : ""}`} style={{ flex: 1, padding: 0 }} onClick={() => onComfort(c)}>{c === "quick" ? "Quick" : "Gentle"}</button>;
+            })}
+          </div>
+        </div>
         {seg("Talk out loud", "voice", [[false, "Off"], [true, "On"]])}
         {seg("Word size", "textSize", [[15, "Small"], [17, "Normal"], [20, "Big"]])}
         {seg("How fast I move", "moveSpeed", [["slow", "Slower"], ["normal", "Normal"]])}
+        <button className="link" style={{ alignSelf: "flex-start", padding: "4px 0" }} onClick={() => (getCurrentWindow().hide(), emitTo("report", "report-open", {}))}>Report a problem with Tech Support</button>
         <div className="grow" />
-        <span className="small">{me.email}</span>
+        <span className="small">
+          {me.email}
+          {me.plan === "trialing" && me.trialEnds ? ` · Free until ${new Date(me.trialEnds).toLocaleDateString(undefined, { month: "long", day: "numeric" })}` : ""}
+        </span>
         <div className="row">
           <button className="btn" style={{ flex: 1 }} onClick={async () => openUrl(`${await server()}/account`)}>My plan</button>
           <button className="btn" style={{ flex: 1 }} onClick={onSignOut}>Sign out</button>
@@ -841,14 +970,14 @@ function Settings({ me, onBack, onChange, onSignOut }: { me: Me; onBack: () => v
 }
 
 // ---------- icons (our own line icons) ----------
-const ChatIcon = () => (
-  <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" aria-hidden="true"><path d="M4 5h16v11H9l-5 4z" strokeLinejoin="round" /><path d="M9.5 9.2a2.5 2.5 0 1 1 3.3 2.4c-.5.2-.8.6-.8 1.1v.3" strokeLinecap="round" /><circle cx="12" cy="14.6" r=".6" fill="currentColor" /></svg>
+const GearIcon = () => (
+  <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" aria-hidden="true"><circle cx="12" cy="12" r="3" /><path d="M12 2.8v2.4M12 18.8v2.4M4.2 7.5l2.1 1.2M17.7 15.3l2.1 1.2M4.2 16.5l2.1-1.2M17.7 8.7l2.1-1.2" strokeLinecap="round" /><circle cx="12" cy="12" r="7" /></svg>
 );
-const WrenchIcon = () => (
-  <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" aria-hidden="true"><path d="M14.5 4.5a4 4 0 0 0-4.9 5.2L4 15.3 6.7 18l5.6-5.6a4 4 0 0 0 5.2-4.9l-2.4 2.4-2.3-.5-.5-2.3z" strokeLinejoin="round" /></svg>
+const PlusIcon = () => (
+  <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" aria-hidden="true"><path d="M12 5v14M5 12h14" strokeLinecap="round" /></svg>
 );
-const LearnIcon = () => (
-  <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" aria-hidden="true"><path d="M3 8.5 12 4l9 4.5-9 4.5z" strokeLinejoin="round" /><path d="M7 10.5v4.5c0 1.4 2.2 2.5 5 2.5s5-1.1 5-2.5v-4.5M21 8.5V14" strokeLinecap="round" /></svg>
+const SendIcon = () => (
+  <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" aria-hidden="true"><path d="M12 19V5M5.5 11.5 12 5l6.5 6.5" strokeLinecap="round" strokeLinejoin="round" /></svg>
 );
 const MicIcon = () => (
   <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" aria-hidden="true"><rect x="9" y="3" width="6" height="11" rx="3" /><path d="M5 11a7 7 0 0 0 14 0M12 18v3" strokeLinecap="round" /></svg>
