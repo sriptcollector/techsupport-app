@@ -90,6 +90,24 @@ jobs:
           while [ $(date +%s) -lt $end ]; do sleep 3; grep -qE 'DONE|PROBLEM|STOPPED' "$LOG" 2>/dev/null && { sleep 6; break; }; done
           grep -q "perm relaunch" "$LOG" && grep -q "perm stage done" "$LOG" && echo "GATE OK: relaunched itself, resumed and confirmed a real screenshot" || { echo "GATE FAIL: no clean resume after relaunch"; fail=1; }
           grep -E "DONE worked=true" "$LOG" && echo "GATE OK: first help worked" || { echo "GATE FAIL: first help didn't finish"; fail=1; }
+          # Regression (Mac test 2026-11-12): after the panel hides on focus loss, the menu bar icon must bring it back.
+          PID=$(pgrep -f "Tech Support.app/Contents/MacOS" | head -1)
+          onscreen() { swift - "$PID" <<'SWIFT' 2>/dev/null || echo 0
+          import CoreGraphics
+          let pid = Int(CommandLine.arguments[1]) ?? -1
+          let l = CGWindowListCopyWindowInfo([.optionOnScreenOnly, .excludeDesktopElements], kCGNullWindowID) as? [[String: Any]] ?? []
+          print(l.filter { ($0[kCGWindowOwnerPID as String] as? Int) == pid && (($0[kCGWindowBounds as String] as? [String: Any])?["Height"] as? Double ?? 0) > 200 }.count)
+          SWIFT
+          }
+          clicktray() { osascript -e 'tell application "System Events" to tell (first process whose unix id is '"$PID"') to click menu bar item 1 of menu bar 2' 2>&1 | tail -1; }
+          [ "$(onscreen)" = "0" ] && { clicktray; sleep 3; }
+          [ "$(onscreen)" != "0" ] && echo "tray open 1: panel on screen" || echo "tray open 1: panel not on screen"
+          open -a TextEdit; sleep 3   # focus moves away: the panel hides itself
+          [ "$(onscreen)" = "0" ] && echo "focus loss: panel hid" || echo "focus loss: panel still on screen"
+          clicktray; sleep 3
+          if [ "$(onscreen)" != "0" ]; then echo "GATE OK: menu bar icon reopens the panel after it hid on focus loss"; else echo "GATE FAIL: menu bar icon does not reopen the panel after focus loss"; fail=1; fi
+          screencapture -x frames/reopen.png || true
+          osascript -e 'quit app "TextEdit"' 2>/dev/null || true
           pkill -f "Tech Support.app/Contents/MacOS" || true; kill $SHOOT || true
           curl -fsS -X DELETE "$STAGING/api/ops/users/$EMAIL" -H "authorization: Bearer $TOKEN" || true
           cat "$LOG"

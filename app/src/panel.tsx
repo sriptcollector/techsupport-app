@@ -59,6 +59,7 @@ export function Panel() {
   const bugWords = useRef<{ text: string; pin: number | null }[]>([]);
   const mic = useRef<Mic | null>(null);
   const firstRun = useRef(false);
+  const blurHidAt = useRef(0);
 
   const say = (who: Line["who"], text: string, pin?: number | null) => setLines((l) => [...l, { who, text, pin }]);
 
@@ -80,8 +81,11 @@ export function Panel() {
     }
     if (!SIZES[v]) await win.center();
     if (v !== "pill") await invoke("walk_focus", { walking: false });
-    await win.show();
-    if (v !== "pill") await win.setFocus();
+    // Native: unhides and activates the Mac app too, so the panel can always come back (Mac test 2026-11-12).
+    await invoke("panel_front", { focus: v !== "pill" }).catch(async () => {
+      await win.show();
+      if (v !== "pill") await win.setFocus();
+    });
   }
   // Keep the pill off the spot the helper is about to press.
   const pillLow = useRef(false);
@@ -137,6 +141,8 @@ export function Panel() {
     });
     const un = [
       listen<boolean>("panel-toggle", async (e) => {
+        // A click on the menu bar icon first takes focus away, which already hid the panel: that click meant "close".
+        if (e.payload && Date.now() - blurHidAt.current < 400) return;
         if (!e.payload || (await win.isVisible())) {
           if (viewRef.current === "home" || viewRef.current === "settings") return win.hide();
           if (!e.payload) return;
@@ -157,7 +163,10 @@ export function Panel() {
     ];
     getEnv().then((env) => register(env.os === "mac" ? "Control+Alt+T" : "Control+Alt+T", (e) => e.state === "Pressed" && emitTo("panel", "panel-toggle", true)).catch(() => {}));
     const blur = win.onFocusChanged(({ payload }) => {
-      if (!payload && viewRef.current === "home") win.hide();
+      if (!payload && viewRef.current === "home") {
+        blurHidAt.current = Date.now();
+        win.hide();
+      }
     });
     return () => {
       un.forEach((p) => p.then((f) => f()));

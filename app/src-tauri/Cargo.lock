@@ -4954,12 +4954,14 @@ dependencies = [
 
 [[package]]
 name = "tech-support"
-version = "0.1.25"
+version = "0.1.26"
 dependencies = [
  "base64 0.22.1",
  "core-foundation 0.10.1",
  "enigo",
  "image",
+ "objc2",
+ "objc2-app-kit",
  "rand 0.8.8",
  "serde",
  "serde_json",

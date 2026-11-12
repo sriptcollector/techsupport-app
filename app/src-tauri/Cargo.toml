@@ -30,6 +30,8 @@ rand = "0.8"
 
 [target.'cfg(target_os = "macos")'.dependencies]
 core-foundation = "0.10"
+objc2 = "0.6"
+objc2-app-kit = { version = "0.3", default-features = false, features = ["std", "NSApplication", "NSResponder", "NSWindow"] }
 
 [target.'cfg(windows)'.dependencies]
 webview2-com = "0.39"
