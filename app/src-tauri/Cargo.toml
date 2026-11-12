@@ -1,6 +1,6 @@
 [package]
 name = "tech-support"
-version = "0.1.25"
+version = "0.1.26"
 description = "Tech Support by Westward"
 authors = ["Westward"]
 edition = "2021"

@@ -618,6 +618,14 @@ function SignIn({ progress, onDone, onBack, who, onSignOut }: { progress: React.
   const [code, setCode] = useState("");
   const [err, setErr] = useState("");
   const [busy, setBusy] = useState(false);
+  // "Send a new code" must say what happened (Orion, 2026-11-12: it was silent).
+  const [sent, setSent] = useState("");
+  const [wait, setWait] = useState(0);
+  useEffect(() => {
+    if (wait <= 0) return;
+    const t = setTimeout(() => setWait((w) => w - 1), 1000);
+    return () => clearTimeout(t);
+  }, [wait]);
   const [googleOn, setGoogleOn] = useState(true);
   useEffect(() => {
     api<{ google: boolean }>("/api/config").then((c) => setGoogleOn(c.google)).catch(() => {});
@@ -636,9 +644,14 @@ function SignIn({ progress, onDone, onBack, who, onSignOut }: { progress: React.
   async function sendCode() {
     setBusy(true);
     setErr("");
+    const again = step === "code";
+    setSent("");
     try {
       await api("/auth/email/start", { email });
       setStep("code");
+      setCode("");
+      setWait(30);
+      if (again) setSent(`New code sent at ${new Date().toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })}. Use the newest email. Check your spam folder too.`);
     } catch (e) {
       setErr((e as ApiError).code === "offline" ? "You're offline. Check your Wi-Fi and try again." : "That email doesn't look right. Check it and try again.");
     }
@@ -713,11 +726,12 @@ function SignIn({ progress, onDone, onBack, who, onSignOut }: { progress: React.
               if (v.length === 6) verify(v);
             }} />
             {err && <p className="err">{err}</p>}
+            {sent && !err && <p className="small" role="status" style={{ textAlign: "center" }}>{sent}</p>}
             <div style={{ height: 8 }} />
             <button className="btn primary full" disabled={busy || code.length !== 6}>{busy ? "Checking…" : "Sign in"}</button>
             <div className="row" style={{ justifyContent: "center" }}>
               {/@gmail\.com$/i.test(email) && <button type="button" className="link" onClick={() => openUrl("https://mail.google.com")}>Open Gmail</button>}
-              <button type="button" className="link" onClick={sendCode}>Send a new code</button>
+              <button type="button" className="link" onClick={sendCode} disabled={busy || wait > 0}>{busy ? "Sending…" : wait > 0 ? `Send a new code (${wait}s)` : "Send a new code"}</button>
             </div>
           </form>
         )}
