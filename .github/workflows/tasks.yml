@@ -9,6 +9,14 @@ on:
       tag:
         description: Release tag published to the test download channel
         required: true
+      os:
+        description: 'Optional JSON list of runners, e.g. ["windows-latest"] (default: Mac and Windows)'
+        required: false
+        default: ''
+      tasks:
+        description: 'Optional JSON list of tasks, e.g. ["text"] (default: all; the Mac text-2/broken-2 repeats run only with all)'
+        required: false
+        default: ''
 permissions:
   contents: write
 env:
@@ -20,11 +28,9 @@ jobs:
       fail-fast: false
       max-parallel: 12
       matrix:
-        os: [macos-latest, windows-latest]
-        task: [text, broken, voice, showme, safe, scam, learn, website, printer]
-        include:
-          - { os: macos-latest, task: text-2 }
-          - { os: macos-latest, task: broken-2 }
+        os: ${{ fromJSON(inputs.os != '' && inputs.os || '["macos-latest","windows-latest"]') }}
+        task: ${{ fromJSON(inputs.tasks != '' && inputs.tasks || '["text","broken","voice","showme","safe","scam","learn","website","printer"]') }}
+        include: ${{ fromJSON(inputs.tasks == '' && inputs.os == '' && '[{"os":"macos-latest","task":"text-2"},{"os":"macos-latest","task":"broken-2"}]' || '[]') }}
     runs-on: ${{ matrix.os }}
     timeout-minutes: 30
     steps:
@@ -61,6 +67,10 @@ jobs:
         if: runner.os == 'Windows'
         shell: powershell
         run: |
+          # The runner's own console windows fill the screen in every screenshot. Minimize them first,
+          # so the footage shows only what a customer would see.
+          Add-Type -Name Win -Namespace U -MemberDefinition '[DllImport("user32.dll")] public static extern bool ShowWindow(System.IntPtr h, int c);'
+          Get-Process | Where-Object { $_.MainWindowHandle -ne 0 -and $_.ProcessName -match '^(conhost|WindowsTerminal|OpenConsole|powershell|pwsh|cmd|Runner\.|provisioner)' } | ForEach-Object { [U.Win]::ShowWindow($_.MainWindowHandle, 6) | Out-Null }
           Get-Process msedge -ErrorAction SilentlyContinue | Stop-Process -Force
           New-Item -Force 'HKLM:\SOFTWARE\Policies\Microsoft\Edge' | Out-Null
           Set-ItemProperty 'HKLM:\SOFTWARE\Policies\Microsoft\Edge' -Name HideFirstRunExperience -Value 1 -Type DWord
