@@ -17,6 +17,10 @@ on:
         description: 'Optional JSON list of tasks, e.g. ["text"] (default: all; the Mac text-2/broken-2 repeats run only with all)'
         required: false
         default: ''
+      record:
+        description: 'Also record a 15 fps screen video on Windows (for site footage)'
+        required: false
+        default: 'false'
 permissions:
   contents: write
 env:
@@ -115,10 +119,18 @@ jobs:
             [System.Drawing.Graphics]::FromImage($bmp).CopyFromScreen($b.Location, [System.Drawing.Point]::Empty, $b.Size); $bmp.Save(("shots\shot-{0:D3}.png" -f $i)); $bmp.Dispose(); $i++; Start-Sleep -Milliseconds 2000 }
           '@ | Set-Content shoot.ps1
           $shooter = Start-Process powershell -ArgumentList '-NoProfile','-File','shoot.ps1' -PassThru -WindowStyle Hidden
+          $rec = $null
+          if ("${{ inputs.record }}" -eq 'true') {
+            if (-not (Get-Command ffmpeg -ErrorAction SilentlyContinue)) { choco install ffmpeg -y --no-progress | Out-Null; $env:Path += ";C:\ProgramData\chocolatey\bin" }
+            # Matroska survives a hard stop, so the video is whole even when the process is killed.
+            $rec = Start-Process ffmpeg -ArgumentList '-y','-f','gdigrab','-framerate','15','-draw_mouse','1','-i','desktop','-c:v','libx264','-preset','veryfast','-crf','20','-pix_fmt','yuv420p','-f','matroska','shots\screen.mkv' -PassThru -WindowStyle Hidden
+            Start-Sleep 2
+          }
           $app = Start-Process "$env:LOCALAPPDATA\Tech Support\tech-support.exe" -PassThru
           $deadline = (Get-Date).AddMinutes(12)
           while ((Get-Date) -lt $deadline) { Start-Sleep 3; if ((Test-Path $env:TECHSUPPORT_AUTOPILOT_LOG) -and (Select-String -Path $env:TECHSUPPORT_AUTOPILOT_LOG -Pattern 'DONE|PROBLEM|STOPPED' -Quiet)) { Start-Sleep 8; break } }
           Stop-Process -Id $app.Id -Force -ErrorAction SilentlyContinue; Stop-Process -Id $shooter.Id -Force -ErrorAction SilentlyContinue
+          if ($rec) { Stop-Process -Id $rec.Id -Force -ErrorAction SilentlyContinue }
           try { Invoke-RestMethod -Method Delete -Uri "$env:STAGING/api/ops/users/$([uri]::EscapeDataString($r.email))" -Headers @{ authorization = "Bearer $($r.token)" } | Out-Null } catch {}
           if (Test-Path $env:TECHSUPPORT_AUTOPILOT_LOG) { Get-Content $env:TECHSUPPORT_AUTOPILOT_LOG | Select-String 'DONE|PROBLEM|STOPPED|tool error' }
 
