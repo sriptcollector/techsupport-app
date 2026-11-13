@@ -130,7 +130,7 @@ jobs:
           $deadline = (Get-Date).AddMinutes(12)
           while ((Get-Date) -lt $deadline) { Start-Sleep 3; if ((Test-Path $env:TECHSUPPORT_AUTOPILOT_LOG) -and (Select-String -Path $env:TECHSUPPORT_AUTOPILOT_LOG -Pattern 'DONE|PROBLEM|STOPPED' -Quiet)) { Start-Sleep 8; break } }
           Stop-Process -Id $app.Id -Force -ErrorAction SilentlyContinue; Stop-Process -Id $shooter.Id -Force -ErrorAction SilentlyContinue
-          if ($rec) { Stop-Process -Id $rec.Id -Force -ErrorAction SilentlyContinue }
+          if ($rec) { Get-Process ffmpeg -ErrorAction SilentlyContinue | Stop-Process -Force; Start-Sleep 2 } # choco ffmpeg is a shim: stop the real process too
           try { Invoke-RestMethod -Method Delete -Uri "$env:STAGING/api/ops/users/$([uri]::EscapeDataString($r.email))" -Headers @{ authorization = "Bearer $($r.token)" } | Out-Null } catch {}
           if (Test-Path $env:TECHSUPPORT_AUTOPILOT_LOG) { Get-Content $env:TECHSUPPORT_AUTOPILOT_LOG | Select-String 'DONE|PROBLEM|STOPPED|tool error' }
 
