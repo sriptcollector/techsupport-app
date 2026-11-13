@@ -290,8 +290,11 @@ fn protect(_w: &WebviewWindow) {
 fn toggle_panel(app: &AppHandle) {
     if let Some(w) = app.get_webview_window("panel") {
         let visible = w.is_visible().unwrap_or(false);
-        eprintln!("[panel] toggle visible={visible}");
-        if visible {
+        let focused = w.is_focused().unwrap_or(false);
+        eprintln!("[panel] toggle visible={visible} focused={focused}");
+        // Behind another app the panel still counts as visible (Mac test v0.1.27: 6 clicks said
+        // visible=true and nothing came forward). Only close it when it is really in front.
+        if visible && focused {
             let _ = app.emit_to("panel", "panel-toggle", false);
         } else {
             // Show it natively first: the webview may be asleep while the app is hidden (Mac test 2026-11-12),
