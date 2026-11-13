@@ -28,13 +28,15 @@ pub fn monitor_scale() -> f64 {
 
 /// On a Mac we use Apple's own `screencapture` tool (it goes through ScreenCaptureKit), not the old
 /// window-list API: newer macOS shows an extra "bypass the private window picker" box to apps using
-/// the old API on every capture. Windows uses the normal capture.
+/// the old API on every capture. JPEG, not PNG: on a Retina screen the PNG round trip took over a
+/// second per step (Orion, 2026-11-13: "terrible slow and glitches" on his Mac). Windows uses the
+/// normal capture.
 fn grab(m: &Monitor) -> Result<DynamicImage, String> {
     #[cfg(target_os = "macos")]
     {
         let _ = m;
-        let path = std::env::temp_dir().join(format!("ts-shot-{}.png", std::process::id()));
-        let st = std::process::Command::new("/usr/sbin/screencapture").args(["-x", "-m", "-t", "png"]).arg(&path).status().map_err(|e| e.to_string())?;
+        let path = std::env::temp_dir().join(format!("ts-shot-{}.jpg", std::process::id()));
+        let st = std::process::Command::new("/usr/sbin/screencapture").args(["-x", "-m", "-t", "jpg"]).arg(&path).status().map_err(|e| e.to_string())?;
         if !st.success() {
             return Err("screen capture was refused".into());
         }
@@ -48,13 +50,46 @@ fn grab(m: &Monitor) -> Result<DynamicImage, String> {
     }
 }
 
+/// Mac: our windows step aside for the AI's picture by going fully see-through in the window server
+/// (one frame), instead of the web page hiding itself and repainting (that blinked the helper off
+/// for over a second each step). `false` puts them back.
+#[cfg(target_os = "macos")]
+pub fn mac_veil(app: &tauri::AppHandle, on: bool) {
+    use tauri::Manager;
+    let wins: Vec<_> = ["panel", "overlay", "report"].iter().filter_map(|l| app.get_webview_window(l)).collect();
+    let (tx, rx) = std::sync::mpsc::channel();
+    let _ = app.run_on_main_thread(move || {
+        for w in wins {
+            if let Ok(ptr) = w.ns_window() {
+                let win: &objc2_app_kit::NSWindow = unsafe { &*(ptr as *const objc2_app_kit::NSWindow) };
+                #[allow(unused_unsafe)]
+                unsafe {
+                    win.setAlphaValue(if on { 0.0 } else { 1.0 });
+                }
+            }
+        }
+        let _ = tx.send(());
+    });
+    let _ = rx.recv_timeout(std::time::Duration::from_millis(500));
+    if on {
+        // Let the window server show the change before the picture is taken.
+        std::thread::sleep(std::time::Duration::from_millis(50));
+    }
+}
+
 /// `region` (logical x, y, w, h) crops to one window; `max` is the longest side in pixels.
 #[tauri::command]
-pub async fn capture(region: Option<(f64, f64, f64, f64)>, max: Option<u32>) -> Result<Shot, String> {
+pub async fn capture(app: tauri::AppHandle, region: Option<(f64, f64, f64, f64)>, max: Option<u32>) -> Result<Shot, String> {
     tauri::async_runtime::spawn_blocking(move || {
         let m = primary()?;
         let scale = m.scale_factor().map_err(|e| e.to_string())? as f64;
-        let mut img = grab(&m)?;
+        #[cfg(target_os = "macos")]
+        mac_veil(&app, true);
+        let got = grab(&m);
+        #[cfg(target_os = "macos")]
+        mac_veil(&app, false);
+        let _ = &app;
+        let mut img = got?;
         let (pw, ph) = (img.width() as f64, img.height() as f64);
         let (mut sw, mut sh) = (pw / scale, ph / scale);
         if let Some((x, y, w, h)) = region {
@@ -67,7 +102,9 @@ pub async fn capture(region: Option<(f64, f64, f64, f64)>, max: Option<u32>) -> 
         }
         let max = max.unwrap_or(1280) as f64;
         let k = (max / img.width().max(img.height()) as f64).min(1.0);
-        let out = if k < 1.0 { img.resize((img.width() as f64 * k) as u32, (img.height() as f64 * k) as u32, FilterType::Triangle) } else { img };
+        // `thumbnail` is a fast box filter: on a 5K Retina picture the triangle filter alone cost ~0.3 s.
+        let (tw, th) = ((img.width() as f64 * k) as u32, (img.height() as f64 * k) as u32);
+        let out = if k < 1.0 { if cfg!(target_os = "macos") { img.thumbnail(tw, th) } else { img.resize(tw, th, FilterType::Triangle) } } else { img };
         let rgb = DynamicImage::ImageRgb8(out.to_rgb8());
         let mut buf = Cursor::new(Vec::new());
         rgb.write_to(&mut buf, ImageFormat::Jpeg).map_err(|e| e.to_string())?;

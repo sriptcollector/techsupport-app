@@ -98,7 +98,8 @@ export type Shot = { data: string; w: number; h: number; sw: number; sh: number;
 // consumer test that protection is off so the VM screenshots show the helper, so we hide our
 // windows for the moment of the AI's screenshot instead: the AI sees what a real user's AI would.
 export async function capture(region?: [number, number, number, number], max = 1280) {
-  const veil = true; // always: our windows step aside for the AI's picture only
+  // Our windows step aside for the AI's picture only. On a Mac the app does it natively (one frame).
+  const veil = (await getEnv()).os !== "mac";
   if (veil) {
     await emit("veil", true);
     await new Promise((r) => setTimeout(r, 180));
@@ -111,6 +112,8 @@ export async function capture(region?: [number, number, number, number], max = 1
 }
 export const act = (action: Record<string, unknown>) => invoke<void>("act", { action });
 export const cursor = () => invoke<[number, number] | null>("cursor");
+/** Seconds since the person last clicked or typed; null where the OS can't tell us (Windows). */
+export const inputAge = () => invoke<number | null>("input_age").catch(() => null);
 export type Win = { title: string; app: string; x: number; y: number; w: number; h: number };
 export const windowsList = () => invoke<Win[]>("windows_list");
 export const overlayMode = (visible: boolean, interactive = false) => invoke("overlay_mode", { visible, interactive });
