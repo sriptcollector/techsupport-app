@@ -5,7 +5,7 @@ import { emit, listen } from "@tauri-apps/api/event";
 listen<boolean>("veil", (e) => (document.documentElement.style.visibility = e.payload ? "hidden" : ""));
 
 declare const __SERVER__: string;
-export type Env = { os: "mac" | "windows"; version: string; server: string | null; test_session: string | null; show_in_capture: boolean; autopilot: string | null };
+export type Env = { os: "mac" | "windows"; version: string; server: string | null; test_session: string | null; show_in_capture: boolean; autopilot: string | null; signin: string | null };
 export type Me = {
   email: string;
   name: string | null;
