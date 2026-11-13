@@ -1,0 +1,21 @@
+name: Check
+# Every PR and push to main: the same typecheck + Rust unit tests the release runs, so a break is
+# caught before a tag (v0.1.28's first cut failed only at release time, 2026-11-13).
+on:
+  pull_request:
+  push:
+    branches: [main]
+jobs:
+  check:
+    runs-on: macos-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2
+      - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable
+      - name: Typecheck
+        working-directory: app
+        run: bun install --frozen-lockfile && bunx tsc -b
+      - name: Unit tests
+        working-directory: app/src-tauri
+        run: mkdir -p ../dist && touch ../dist/index.html && cargo test --lib

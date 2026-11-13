@@ -167,6 +167,13 @@ fn walk_focus(app: AppHandle, walking: bool) {
             if let Some(w) = app.get_webview_window("panel") {
                 let _ = w.show();
             }
+            if let Some(p) = app.get_webview_window("panel") {
+                p.on_window_event(|e| {
+                    if let tauri::WindowEvent::Focused(false) = e {
+                        *PANEL_BLUR.lock().unwrap() = Some(std::time::Instant::now());
+                    }
+                });
+            }
             if let Some(o) = app.get_webview_window("overlay") {
                 let _ = o.show();
             }
@@ -293,20 +300,72 @@ fn protect(_w: &WebviewWindow) {
     // over Zoom must see them). They're hidden only for the instant the AI takes its picture (api.ts).
 }
 
+static PANEL_BLUR: Mutex<Option<std::time::Instant>> = Mutex::new(None);
+
+#[derive(Debug, PartialEq)]
+enum Toggle {
+    Nothing,
+    Close,
+    Front,
+}
+
+/// What a menu bar / tray click (or the shortcut) does. Kept pure so the tests below pin each past break.
+fn toggle_action(visible: bool, focused: bool, just_blurred: bool) -> Toggle {
+    // It was open a moment ago and the click itself hid it (Windows tray): the click meant "close".
+    if !visible && just_blurred {
+        return Toggle::Nothing;
+    }
+    // Behind another app the panel still counts as visible (Mac test v0.1.27: 6 clicks said
+    // visible=true and nothing came forward). Only close it when it is really in front.
+    if visible && (focused || just_blurred) {
+        Toggle::Close
+    } else {
+        Toggle::Front
+    }
+}
+
+#[cfg(test)]
+mod toggle_tests {
+    use super::*;
+    #[test]
+    fn hidden_panel_opens() {
+        assert_eq!(toggle_action(false, false, false), Toggle::Front);
+    }
+    #[test]
+    fn panel_behind_another_app_comes_front() {
+        // Mac v0.1.27 break: visible but not focused must come forward, not "close".
+        assert_eq!(toggle_action(true, false, false), Toggle::Front);
+    }
+    #[test]
+    fn focused_panel_closes() {
+        assert_eq!(toggle_action(true, true, false), Toggle::Close);
+    }
+    #[test]
+    fn windows_tray_click_that_blurred_it_closes() {
+        assert_eq!(toggle_action(true, false, true), Toggle::Close);
+        assert_eq!(toggle_action(false, false, true), Toggle::Nothing);
+    }
+}
+
 fn toggle_panel(app: &AppHandle) {
     if let Some(w) = app.get_webview_window("panel") {
         let visible = w.is_visible().unwrap_or(false);
         let focused = w.is_focused().unwrap_or(false);
-        eprintln!("[panel] toggle visible={visible} focused={focused}");
-        // Behind another app the panel still counts as visible (Mac test v0.1.27: 6 clicks said
-        // visible=true and nothing came forward). Only close it when it is really in front.
-        if visible && focused {
-            let _ = app.emit_to("panel", "panel-toggle", false);
-        } else {
-            // Show it natively first: the webview may be asleep while the app is hidden (Mac test 2026-11-12),
-            // so the page only picks the view and size afterwards.
-            panel_front(app.clone(), true);
-            let _ = app.emit_to("panel", "panel-toggle", true);
+        // A tray click on Windows takes focus from the panel (and the home view hides on blur) just
+        // before this runs: a focus loss in the last 400 ms means the person was looking at it.
+        let just_blurred = PANEL_BLUR.lock().unwrap().map_or(false, |t| t.elapsed().as_millis() < 400);
+        eprintln!("[panel] toggle visible={visible} focused={focused} just_blurred={just_blurred}");
+        match toggle_action(visible, focused, just_blurred) {
+            Toggle::Nothing => {}
+            Toggle::Close => {
+                let _ = app.emit_to("panel", "panel-toggle", false);
+            }
+            Toggle::Front => {
+                // Show it natively first: the webview may be asleep while the app is hidden (Mac test 2026-11-12),
+                // so the page only picks the view and size afterwards.
+                panel_front(app.clone(), true);
+                let _ = app.emit_to("panel", "panel-toggle", true);
+            }
         }
     }
 }
