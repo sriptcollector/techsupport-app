@@ -29,6 +29,7 @@ struct Env {
     test_session: Option<String>,
     show_in_capture: bool,
     autopilot: Option<String>,
+    signin: Option<String>,
 }
 
 #[tauri::command]
@@ -41,6 +42,11 @@ fn env_info(app: AppHandle) -> Env {
         test_session: std::env::var("TECHSUPPORT_TEST_SESSION").ok(),
         show_in_capture: std::env::var("TECHSUPPORT_SHOW_IN_CAPTURE").is_ok(),
         autopilot: std::env::var("TECHSUPPORT_AUTOPILOT").ok(),
+        // Test route (Mac tester, 2026-11-12): TS_SIGNIN=email or --signin=email opens the email form
+        // and turns the Google button off, so a test never signs in with a real browser account.
+        signin: std::env::var("TS_SIGNIN").ok().or_else(|| {
+            std::env::args().find_map(|a| a.strip_prefix("--signin=").map(str::to_string))
+        }),
     }
 }
 

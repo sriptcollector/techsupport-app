@@ -18,6 +18,7 @@ export type Me = {
   usage: { sessions: number; limit: number };
   settings: { speech: "slow" | "normal" | "fast"; voice: boolean; textSize: number; moveSpeed: "slow" | "normal"; talkLess: boolean };
   test: boolean;
+  signin?: string | null;
 };
 
 let env: Env | null = null;

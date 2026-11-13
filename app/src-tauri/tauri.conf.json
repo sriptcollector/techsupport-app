@@ -16,6 +16,7 @@
     "windows": [
       {
         "label": "panel",
+        "acceptFirstMouse": true,
         "url": "index.html?view=panel",
         "title": "Tech Support",
         "width": 560,

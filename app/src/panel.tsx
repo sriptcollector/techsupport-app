@@ -636,7 +636,14 @@ function SignIn({ progress, onDone, onBack, who, onSignOut }: { progress: React.
   }, [wait]);
   const [googleOn, setGoogleOn] = useState(true);
   useEffect(() => {
-    api<{ google: boolean }>("/api/config").then((c) => setGoogleOn(c.google)).catch(() => {});
+    getEnv().then((env) => {
+      if (env.signin === "email") {
+        setGoogleOn(false);
+        setStep((s) => (s === "choose" ? "email" : s));
+        return;
+      }
+      api<{ google: boolean }>("/api/config").then((c) => setGoogleOn(c.google)).catch(() => {});
+    });
   }, []);
   async function google() {
     setStep("waiting");
