@@ -35,7 +35,11 @@ fn grab(m: &Monitor) -> Result<DynamicImage, String> {
     #[cfg(target_os = "macos")]
     {
         let _ = m;
-        let path = std::env::temp_dir().join(format!("ts-shot-{}.jpg", std::process::id()));
+        // One file per picture: two pictures at once (the setup check and the helper) shared one name,
+        // and one deleted the other's file ("I can't see your screen yet", Mac test 2026-11-14).
+        static N: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+        let n = N.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        let path = std::env::temp_dir().join(format!("ts-shot-{}-{n}.jpg", std::process::id()));
         let st = std::process::Command::new("/usr/sbin/screencapture").args(["-x", "-m", "-t", "jpg"]).arg(&path).status().map_err(|e| e.to_string())?;
         if !st.success() {
             return Err("screen capture was refused".into());
