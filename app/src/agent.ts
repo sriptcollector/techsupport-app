@@ -4,7 +4,7 @@
 import { emitTo } from "@tauri-apps/api/event";
 import { register, unregister } from "@tauri-apps/plugin-global-shortcut";
 import { invoke } from "@tauri-apps/api/core";
-import { act, apLog, api, autopilot, ApiError, capture, cursor, getEnv, hush, speak, track, type Me, type Shot } from "./api";
+import { act, apLog, api, autopilot, ApiError, capture, cursor, getEnv, hush, inputAge, speak, track, type Me, type Shot } from "./api";
 import type { Expr } from "./bot";
 
 export type Pick = "do" | "show" | "steps";
@@ -280,15 +280,35 @@ Only reverse real changes (settings, text, files). Then call done.`;
           const [px, py] = this.expected;
           setTimeout(() => act({ do: "click", x: px, y: py }).catch(() => {}), 2500);
         }
+        // Mac: watch for the person's click or typing (no screenshots, so nothing blinks); a screen
+        // check every 4 s is the fallback. Windows: a screen check every 0.7 s as before.
+        const mac = (await inputAge()) !== null;
+        const since = Date.now();
         await new Promise<void>((resolve) => {
+          let checking = false, lastShot = Date.now(), done = false;
+          const finish = () => {
+            if (done) return;
+            done = true;
+            clearInterval(iv);
+            setTimeout(resolve, 900); // let the screen settle
+          };
           const iv = setInterval(async () => {
             if (this.aborted) return clearInterval(iv), resolve();
-            const now = hash((await capture(undefined, 320)).data);
-            if (now !== before) {
-              clearInterval(iv);
-              setTimeout(resolve, 900); // let the screen settle
+            if (checking || done) return;
+            checking = true;
+            try {
+              if (mac) {
+                const age = await inputAge();
+                if (age !== null && age * 1000 < Date.now() - since) return finish();
+                if (Date.now() - lastShot < 4000) return;
+                lastShot = Date.now();
+              }
+              const now = hash((await capture(undefined, 320)).data);
+              if (now !== before) finish();
+            } finally {
+              checking = false;
             }
-          }, 700);
+          }, mac ? 150 : 700);
           this.stopWaiters.push(() => (clearInterval(iv), resolve()));
         });
         ov("ov:point", null);

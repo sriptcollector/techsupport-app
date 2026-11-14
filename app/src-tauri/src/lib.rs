@@ -427,6 +427,7 @@ pub fn run() {
             screen::windows_list,
             input::act,
             input::cursor,
+            input::input_age,
             quick::quick,
             perms::perms_status,
             perms::perms_open,

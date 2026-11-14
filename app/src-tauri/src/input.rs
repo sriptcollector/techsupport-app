@@ -223,9 +223,64 @@ fn run(action: Action) -> Result<(), String> {
 /// Where the real pointer is, in logical points (used to notice the person moving the mouse).
 #[tauri::command]
 pub async fn cursor(app: tauri::AppHandle) -> Option<(f64, f64)> {
-    let (x, y) = on_main(&app, || Enigo::new(&Settings::default()).ok().and_then(|e| e.location().ok())).ok()??;
-    let s = if cfg!(windows) { crate::screen::monitor_scale() } else { 1.0 };
-    Some((x as f64 / s, y as f64 / s))
+    // Mac: read the pointer straight from Core Graphics on this thread. Going through the main thread
+    // (Enigo) ten times a second stalled the windows' drawing, so the helper stuttered.
+    #[cfg(target_os = "macos")]
+    {
+        let _ = app;
+        return mac::pointer();
+    }
+    #[cfg(not(target_os = "macos"))]
+    {
+        let (x, y) = on_main(&app, || Enigo::new(&Settings::default()).ok().and_then(|e| e.location().ok())).ok()??;
+        let s = crate::screen::monitor_scale();
+        Some((x as f64 / s, y as f64 / s))
+    }
+}
+
+/// Seconds since the person last clicked or typed (Mac). Lets "your turn" steps notice the person's
+/// click without taking a screenshot every 0.7 s (each one blinked the helper). None on Windows.
+#[tauri::command]
+pub fn input_age() -> Option<f64> {
+    #[cfg(target_os = "macos")]
+    return Some(mac::input_age());
+    #[cfg(not(target_os = "macos"))]
+    None
+}
+
+#[cfg(target_os = "macos")]
+mod mac {
+    use std::ffi::c_void;
+    #[repr(C)]
+    struct CGPoint {
+        x: f64,
+        y: f64,
+    }
+    #[link(name = "CoreGraphics", kind = "framework")]
+    extern "C" {
+        fn CGEventCreate(source: *const c_void) -> *const c_void;
+        fn CGEventGetLocation(event: *const c_void) -> CGPoint;
+        fn CGEventSourceSecondsSinceLastEventType(state: i32, kind: u32) -> f64;
+    }
+    #[link(name = "CoreFoundation", kind = "framework")]
+    extern "C" {
+        fn CFRelease(cf: *const c_void);
+    }
+    pub fn pointer() -> Option<(f64, f64)> {
+        unsafe {
+            let e = CGEventCreate(std::ptr::null());
+            if e.is_null() {
+                return None;
+            }
+            let p = CGEventGetLocation(e);
+            CFRelease(e);
+            Some((p.x, p.y))
+        }
+    }
+    pub fn input_age() -> f64 {
+        // 1 = HID system state (the real mouse and keyboard). Left/right mouse up, key up.
+        unsafe { [2u32, 4, 11].iter().map(|k| CGEventSourceSecondsSinceLastEventType(1, *k)).fold(f64::MAX, f64::min) }
+    }
 }
 
 #[cfg(test)]
